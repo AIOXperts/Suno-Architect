@@ -392,7 +392,9 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('suno_history', JSON.stringify(history));
+    try {
+      localStorage.setItem('suno_history', JSON.stringify(history));
+    } catch {}
   }, [history]);
 
   useEffect(() => {

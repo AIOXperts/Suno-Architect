@@ -1568,8 +1568,8 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
         }
 
         // Title & Progress Bar
-        if (clipData && duration) {
-            const pct = time / duration;
+        if (clipData && totalPreviewDuration) {
+            const pct = time / totalPreviewDuration;
             ctx.fillStyle = currentActiveColor;
             ctx.fillRect(0, height - 8, width * pct, 8);
         }
