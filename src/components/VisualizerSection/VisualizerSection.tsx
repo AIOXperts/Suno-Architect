@@ -1,11 +1,12 @@
 
 import React from 'react';
-import { SunoClip } from '../../types';
+import { AIProviderConfig, SunoClip } from '../../types';
 import VisualizerHeader from './VisualizerHeader';
 import VisualizerSettings from './VisualizerSettings';
 import { formatTime } from '../../utils/visualizer';
 import { useVisualizer } from './hooks/useVisualizer';
 import { AppButton, AppCard, AppInput, AppSelect, AppTextarea, StatusMessage } from '../ui/AppPrimitives';
+import { LibrarySelection } from '../LibraryPickerModal';
 
 // Subcomponents
 import MetadataCard from './subcomponents/MetadataCard';
@@ -22,11 +23,11 @@ interface VisualizerSectionProps {
   onUpdateClip: (id: string, updates: Partial<SunoClip>) => void;
   apiKey?: string;
   geminiModel?: string;
-  providerConfig?: unknown;
+  providerConfig?: AIProviderConfig;
 }
 
-const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel }) => {
-  const { state, setters, refs, handlers } = useVisualizer(history, sunoCookie, onUpdateClip, apiKey, geminiModel);
+const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCookie, onUpdateClip, apiKey, geminiModel, providerConfig }) => {
+  const { state, setters, refs, handlers } = useVisualizer(history, sunoCookie, onUpdateClip, apiKey, geminiModel, providerConfig);
   const [publishTarget, setPublishTarget] = React.useState<'youtube' | 'facebook' | 'both'>('youtube');
   const [fbAspect, setFbAspect] = React.useState<'landscape' | 'portrait'>('landscape');
   const [publishTitle, setPublishTitle] = React.useState('');
@@ -44,6 +45,14 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
 
   const effectiveAspect: 'landscape' | 'portrait' =
     publishTarget === 'youtube' ? 'landscape' : publishTarget === 'facebook' ? fbAspect : fbAspect;
+
+  const handleSelectFromLibrary = React.useCallback((selection: LibrarySelection) => {
+    const clipId = selection.track.sunoId || selection.track.id;
+    if (clipId) {
+      setters.setSelectedClipId(clipId);
+      setters.setManualId(clipId);
+    }
+  }, [setters]);
 
   const handlePublish = async () => {
     if (!state.clipData) return;
@@ -129,13 +138,20 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             manualId={state.manualId}
             setManualId={setters.setManualId}
             onManualLoad={handlers.handleManualLoad}
+            onSelectFromLibrary={handleSelectFromLibrary}
         />
 
         {/* Main Content */}
         {state.selectedClipId && state.clipData && (
+             <>
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                  {/* Left: Controls & Info */}
                  <div className="lg:col-span-1 space-y-6">
+                     <AppCard className="p-3">
+                        <p className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Workflow</p>
+                        <p className="text-xs text-slate-300 mt-1">1) Load clip 2) Tune lyrics/media 3) Preview timeline with pre/post cards 4) Render export.</p>
+                     </AppCard>
+
                      {state.renderError && (
                         <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-3 text-xs text-red-200">
                             <div className="font-bold mb-1">Last Render Error</div>
@@ -146,9 +162,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      <MetadataCard 
                         lyricSource={state.lyricSource}
                         setLyricSource={setters.setLyricSource}
+                        lrcDraft={state.lrcDraft}
+                        setLrcDraft={setters.setLrcDraft}
                         onApplyLyrics={handlers.handleApplyLyrics}
+                        onApplyLrc={handlers.handleApplyLrc}
+                        onGenerateLrcFromCurrentLines={handlers.handleGenerateLrcFromCurrentLines}
                         applyStatus={state.applyStatus}
+                        lrcApplyStatus={state.lrcApplyStatus}
                         hasAlignment={!!state.alignment}
+                        longLineIssues={state.longLineIssues}
+                        longLrcGapIssues={state.longLrcGapIssues}
+                        lrcInvalidLineNumbers={state.lrcInvalidLineNumbers}
+                        lrcParsedLineCount={state.lrcParsedLineCount}
                      />
 
                      <MediaCard 
@@ -156,6 +181,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                         mainVisualizerEnabled={state.mainVisualizerEnabled} setMainVisualizerEnabled={setters.setMainVisualizerEnabled}
                         customBg={state.customBg} setCustomBg={setters.setCustomBg}
                         logoAsset={state.logoAsset} setLogoAsset={setters.setLogoAsset}
+                        hasDefaultLogo={state.hasDefaultLogo}
                         customAudio={state.customAudio} setCustomAudio={setters.setCustomAudio}
                         imgSrc={state.imgSrc}
                         qt6Style={state.qt6Style}
@@ -164,6 +190,8 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                         onFileUpload={handlers.handleFileUpload}
                         onAudioUpload={handlers.handleAudioUpload}
                         onLogoUpload={handlers.handleLogoUpload}
+                        onSetLogoAsDefault={handlers.handleSetLogoAsDefault}
+                        onClearDefaultLogo={handlers.handleClearDefaultLogo}
                         handleImageError={handlers.handleImageError}
                      />
                      
@@ -202,54 +230,62 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                         hasAlignment={!!state.alignment}
                      />
 
-                      <AppCard className="space-y-3">
-                        <p className="text-sm font-semibold text-white">Publishing Workflow</p>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          <AppSelect
-                            value={publishTarget}
-                            onChange={(e) => setPublishTarget(e.target.value as 'youtube' | 'facebook' | 'both')}
-                            className="h-10"
-                          >
-                            <option value="youtube">Publish: YouTube (16:9)</option>
-                            <option value="facebook">Publish: Facebook (16:9 / 9:16)</option>
-                            <option value="both">Publish: Both (FB then YT)</option>
-                          </AppSelect>
-
-                          {(publishTarget === 'facebook' || publishTarget === 'both') && (
+                      <details className="group">
+                        <summary className="cursor-pointer list-none">
+                          <AppCard className="p-3 flex items-center justify-between">
+                            <p className="text-sm font-semibold text-white">Publishing Workflow</p>
+                            <span className="text-xs text-slate-400 group-open:hidden">Expand</span>
+                            <span className="text-xs text-slate-400 hidden group-open:inline">Collapse</span>
+                          </AppCard>
+                        </summary>
+                        <AppCard className="space-y-3 mt-2">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                             <AppSelect
-                              value={fbAspect}
-                              onChange={(e) => setFbAspect(e.target.value as 'landscape' | 'portrait')}
+                              value={publishTarget}
+                              onChange={(e) => setPublishTarget(e.target.value as 'youtube' | 'facebook' | 'both')}
                               className="h-10"
                             >
-                              <option value="landscape">Facebook Aspect: 16:9 Landscape</option>
-                              <option value="portrait">Facebook Aspect: 9:16 Portrait</option>
+                              <option value="youtube">Publish: YouTube (16:9)</option>
+                              <option value="facebook">Publish: Facebook (16:9 / 9:16)</option>
+                              <option value="both">Publish: Both (FB then YT)</option>
                             </AppSelect>
-                          )}
-                        </div>
 
-                        <AppInput
-                          value={publishTitle}
-                          onChange={(e) => setPublishTitle(e.target.value)}
-                          placeholder="Publish title"
-                        />
-                        <AppTextarea
-                          value={publishDescription}
-                          onChange={(e) => setPublishDescription(e.target.value)}
-                          placeholder="Publish description"
-                          className="h-24 resize-y"
-                        />
+                            {(publishTarget === 'facebook' || publishTarget === 'both') && (
+                              <AppSelect
+                                value={fbAspect}
+                                onChange={(e) => setFbAspect(e.target.value as 'landscape' | 'portrait')}
+                                className="h-10"
+                              >
+                                <option value="landscape">Facebook Aspect: 16:9 Landscape</option>
+                                <option value="portrait">Facebook Aspect: 9:16 Portrait</option>
+                              </AppSelect>
+                            )}
+                          </div>
 
-                        <AppButton
-                          variant="primary"
-                          onClick={handlePublish}
-                          disabled={!state.clipData || publishState === 'publishing'}
-                          className="w-full"
-                        >
-                          {publishState === 'publishing' ? 'Publishing...' : 'Run Publish Workflow'}
-                        </AppButton>
+                          <AppInput
+                            value={publishTitle}
+                            onChange={(e) => setPublishTitle(e.target.value)}
+                            placeholder="Publish title"
+                          />
+                          <AppTextarea
+                            value={publishDescription}
+                            onChange={(e) => setPublishDescription(e.target.value)}
+                            placeholder="Publish description"
+                            className="h-24 resize-y"
+                          />
 
-                        <StatusMessage state={publishState} message={publishMessage} />
-                      </AppCard>
+                          <AppButton
+                            variant="primary"
+                            onClick={handlePublish}
+                            disabled={!state.clipData || publishState === 'publishing'}
+                            className="w-full"
+                          >
+                            {publishState === 'publishing' ? 'Publishing...' : 'Run Publish Workflow'}
+                          </AppButton>
+
+                          <StatusMessage state={publishState} message={publishMessage} />
+                        </AppCard>
+                      </details>
                  </div>
 
                  {/* Right: Canvas Preview */}
@@ -301,6 +337,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                         preRollType={state.preRollType} setPreRollType={setters.setPreRollType}
                         preRollText={state.preRollText} setPreRollText={setters.setPreRollText}
                         preRollSeconds={state.preRollSeconds} setPreRollSeconds={setters.setPreRollSeconds}
+                        preRollPreviewEnabled={state.preRollPreviewEnabled} setPreRollPreviewEnabled={setters.setPreRollPreviewEnabled}
+                        preRollPreviewStartSeconds={state.preRollPreviewStartSeconds} setPreRollPreviewStartSeconds={setters.setPreRollPreviewStartSeconds}
+                        preRollPreviewDurationSeconds={state.preRollPreviewDurationSeconds} setPreRollPreviewDurationSeconds={setters.setPreRollPreviewDurationSeconds}
+                        preRollPreviewShowTitle={state.preRollPreviewShowTitle} setPreRollPreviewShowTitle={setters.setPreRollPreviewShowTitle}
+                        preRollCardShowTitle={state.preRollCardShowTitle} setPreRollCardShowTitle={setters.setPreRollCardShowTitle}
+                        preRollCardTitleText={state.preRollCardTitleText} setPreRollCardTitleText={setters.setPreRollCardTitleText}
+                        preRollCardTheme={state.preRollCardTheme} setPreRollCardTheme={setters.setPreRollCardTheme}
                         postRollEnabled={state.postRollEnabled} setPostRollEnabled={setters.setPostRollEnabled}
                         postRollType={state.postRollType} setPostRollType={setters.setPostRollType}
                         postRollText={state.postRollText} setPostRollText={setters.setPostRollText}
@@ -331,6 +374,13 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                             setters.setPreRollType('text');
                             setters.setPreRollText('Thank you for supporting my work');
                             setters.setPreRollSeconds(4);
+                            setters.setPreRollPreviewEnabled(false);
+                            setters.setPreRollPreviewStartSeconds(20);
+                            setters.setPreRollPreviewDurationSeconds(7);
+                            setters.setPreRollPreviewShowTitle(true);
+                            setters.setPreRollCardShowTitle(true);
+                            setters.setPreRollCardTitleText('');
+                            setters.setPreRollCardTheme('clean');
                             setters.setPostRollEnabled(false);
                             setters.setPostRollType('text');
                             setters.setPostRollText('Tripped Out Tim');
@@ -369,6 +419,24 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                      />
                  </div>
              </div>
+
+             <details className="group">
+                <summary className="cursor-pointer list-none">
+                  <AppCard className="p-3 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-white">Advanced: Word Alignment Editor</p>
+                    <span className="text-xs text-slate-400 group-open:hidden">Expand</span>
+                    <span className="text-xs text-slate-400 hidden group-open:inline">Collapse</span>
+                  </AppCard>
+                </summary>
+                <div className="mt-2">
+                  <WordAlignmentEditorCard
+                    alignment={state.alignment}
+                    currentTime={state.progress}
+                    onApplyAlignment={handlers.handleReplaceAlignment}
+                  />
+                </div>
+             </details>
+             </>
         )}
         
         {!state.selectedClipId && (

@@ -23,6 +23,7 @@ interface Env {
   ALLOW_REGISTRATION?: string;
   ALLOWED_ORIGINS?: string;
   KEY_ENCRYPTION_SECRET?: string;
+  DISABLE_AUTH?: string;
 }
 
 type MemoryUser = {
@@ -84,6 +85,18 @@ type RateBucket = { count: number; resetAt: number };
 const rateBuckets = new Map<string, RateBucket>();
 
 const SESSION_COOKIE_NAME = "sa_session";
+const AUTH_BYPASS_USER: MemoryUser = {
+  id: -1,
+  email: "auth-bypass@local",
+  password_hash: "",
+  salt: "",
+  role: "admin",
+  created_at: new Date(0).toISOString(),
+};
+
+function isAuthDisabled(env: Env): boolean {
+  return String(env.DISABLE_AUTH || "").toLowerCase() === "true";
+}
 
 function buildCorsHeaders(request: Request, env: Env): Record<string, string> {
   const origin = request.headers.get("Origin");
@@ -446,6 +459,9 @@ function clearSessionCookie(): string {
 }
 
 async function requireAuth(request: Request, env: Env): Promise<MemoryUser | Response> {
+  if (isAuthDisabled(env)) {
+    return AUTH_BYPASS_USER;
+  }
   const token = extractAppToken(request);
   if (!token) return json(request, env, { error: "Authentication required" }, 401);
 

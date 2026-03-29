@@ -2,6 +2,19 @@
 import { ParsedSunoOutput, LyricAlignmentResponse } from "../types";
 import { listAllTracks, listTracksByUpdatedAtDesc } from './offlineDb';
 
+export class SunoApiError extends Error {
+    status?: number;
+
+    constructor(message: string, status?: number) {
+        super(message);
+        this.name = 'SunoApiError';
+        this.status = status;
+    }
+}
+
+export const isSunoUnauthorizedError = (error: unknown): boolean =>
+    error instanceof SunoApiError && error.status === 401;
+
 export const extractSunoPlaylistId = (input: string): string | null => {
     const trimmed = (input || "").trim();
     if (!trimmed) return null;
@@ -89,7 +102,7 @@ export const getSunoCredits = async (cookie: string): Promise<number> => {
         });
 
         if (!response.ok) {
-            throw new Error(`Failed to fetch credits. Status: ${response.status}`);
+            throw new SunoApiError(`Failed to fetch credits. Status: ${response.status}`, response.status);
         }
 
         const data = await response.json();
@@ -148,11 +161,11 @@ export const getSunoFeed = async (
         });
 
         if (response.status === 429) {
-            throw new Error("429");
+            throw new SunoApiError("429", 429);
         }
 
         if (!response.ok) {
-            throw new Error(`Failed to fetch feed. Status: ${response.status}`);
+            throw new SunoApiError(`Failed to fetch feed. Status: ${response.status}`, response.status);
         }
 
         return await response.json();
@@ -455,4 +468,113 @@ export const updateSunoMetadata = async (clipId: string, data: ParsedSunoOutput,
         console.error("Failed to update metadata", e);
         return null; 
     }
+};
+
+export interface WavConversionTask {
+    taskId: string;
+    musicId: string;
+    musicIndex: number;
+    status: 'PENDING' | 'SUCCESS' | 'CREATE_TASK_FAILED' | 'GENERATE_WAV_FAILED' | 'CALLBACK_EXCEPTION';
+    audioWavUrl?: string;
+    errorMessage?: string;
+    createTime?: string;
+    completeTime?: string;
+}
+
+const normalizeWavStatus = (value: unknown, audioWavUrl?: string): WavConversionTask['status'] => {
+    if (value === true && audioWavUrl) return 'SUCCESS';
+    if (typeof value === 'string') {
+        const upper = value.toUpperCase();
+        if (upper === 'SUCCESS' || upper === 'PENDING' || upper === 'CREATE_TASK_FAILED' || upper === 'GENERATE_WAV_FAILED' || upper === 'CALLBACK_EXCEPTION') {
+            return upper as WavConversionTask['status'];
+        }
+    }
+    return audioWavUrl ? 'SUCCESS' : 'PENDING';
+};
+
+export const convertToWav = async (musicId: string, musicIndex: number = 0, apiKey: string): Promise<{ taskId: string }> => {
+    if (!apiKey) throw new Error("No API key provided");
+    if (!musicId) throw new Error("No music ID provided");
+
+    const ENDPOINT = "https://api.sunoapi.org/api/v1/wav/create";
+
+    const response = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            musicId,
+            musicIndex,
+        }),
+    });
+
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({ msg: "Failed to create WAV conversion" }));
+        throw new Error(error.msg || `Failed to create WAV conversion. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const taskId = data?.data?.taskId || data?.taskId || data?.data?.id || data?.id;
+    if (!taskId || typeof taskId !== 'string') {
+        throw new Error("WAV conversion task was created but no taskId was returned");
+    }
+    return { taskId };
+};
+
+export const getWavConversionStatus = async (taskId: string, apiKey: string): Promise<WavConversionTask> => {
+    if (!apiKey) throw new Error("No API key provided");
+    if (!taskId) throw new Error("No task ID provided");
+
+    const ENDPOINT = `https://api.sunoapi.org/api/v1/wav/record-info?taskId=${encodeURIComponent(taskId)}`;
+
+    const response = await fetch(ENDPOINT, {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${apiKey}`,
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to get WAV conversion status. Status: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const payload = data?.data || data || {};
+    const responsePayload = payload?.response || {};
+    const audioWavUrl = responsePayload?.audioWavUrl || payload?.audioWavUrl;
+    const status = normalizeWavStatus(
+        payload?.successFlag ?? payload?.status ?? payload?.state ?? data?.status,
+        audioWavUrl
+    );
+    return {
+        taskId: payload?.taskId || taskId,
+        musicId: payload?.musicId || "",
+        musicIndex: payload?.musicIndex || 0,
+        status,
+        audioWavUrl,
+        errorMessage: payload?.errorMessage || payload?.message || data?.msg,
+        createTime: payload?.createTime,
+        completeTime: payload?.completeTime,
+    };
+};
+
+export const waitForWavConversion = async (taskId: string, apiKey: string, maxAttempts: number = 60, intervalMs: number = 5000): Promise<WavConversionTask> => {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const result = await getWavConversionStatus(taskId, apiKey);
+        
+        if (result.status === 'SUCCESS') {
+            return result;
+        }
+        
+        if (result.status === 'CREATE_TASK_FAILED' || result.status === 'GENERATE_WAV_FAILED' || result.status === 'CALLBACK_EXCEPTION') {
+            throw new Error(result.errorMessage || `WAV conversion failed: ${result.status}`);
+        }
+        
+        // Still PENDING, wait and retry
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+    
+    throw new Error("WAV conversion timed out");
 };

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import App from "../App";
 import {
+  AUTH_BYPASS_ENABLED,
   AuthUser,
   login,
   logout,
@@ -19,9 +20,15 @@ const AuthGate: React.FC = () => {
   const [devBypass, setDevBypass] = useState(false);
 
   const isDev = useMemo(() => !!import.meta.env.DEV, []);
+  const authBypassEnabled = AUTH_BYPASS_ENABLED;
 
   useEffect(() => {
     const bootstrap = async () => {
+      if (authBypassEnabled) {
+        setLoading(false);
+        setDevBypass(true);
+        return;
+      }
       try {
         const current = await me();
         setUser(current);
@@ -32,7 +39,7 @@ const AuthGate: React.FC = () => {
       }
     };
     bootstrap();
-  }, []);
+  }, [authBypassEnabled]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,6 +139,9 @@ const AuthGate: React.FC = () => {
             Continue in local dev bypass mode
           </button>
         )}
+        <div className="mt-3 text-[11px] text-slate-500">
+          Set <code>VITE_DISABLE_AUTH=true</code> to bypass this screen.
+        </div>
       </div>
     </div>
   );

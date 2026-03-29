@@ -1,5 +1,44 @@
 import { DBSchema, openDB } from 'idb';
 
+export interface MasteringSettings {
+  inputGain: number;
+  glueCompression: boolean;
+  deharsh: boolean;
+  cleanLowEnd: boolean;
+  autoLevel: boolean;
+  addPunch: boolean;
+  stereoWidth: number;
+  centerBass: boolean;
+  cutMud: boolean;
+  addAir: boolean;
+  tapeWarmth: boolean;
+  normalizeLoudness: boolean;
+  targetLufs: number;
+  truePeakLimit: boolean;
+  ceiling: number;
+  sampleRate: number;
+  bitDepth: number;
+  eq: {
+    low: number;
+    lowMid: number;
+    mid: number;
+    highMid: number;
+    high: number;
+  };
+}
+
+export interface TrackVariant {
+  id: string;
+  type: 'mastered' | 'remastered' | 'custom';
+  title: string;
+  audioUrl: string;
+  audioBlob?: Blob;
+  imageUrl?: string;
+  createdAt: number;
+  settings?: MasteringSettings;
+  parentVariantId?: string;
+}
+
 export interface OfflineTrack {
   id: string;
   sunoId: string;
@@ -18,6 +57,7 @@ export interface OfflineTrack {
   raw: any;
   updatedAt: number;
   createdAt: number;
+  variants?: TrackVariant[];
 }
 
 export interface OfflineAlbum {
@@ -49,9 +89,9 @@ export interface OfflineRenderHistory {
   clipTitle: string;
   createdAt: number; // timestamp
   settings: any; // The visualizer config snapshot used
-  mediaBlob: Blob; // The actual video file
-  mimeType: string;
-  fileSize: number;
+  mediaBlob?: Blob; // Legacy: older entries may contain the rendered video file
+  mimeType?: string;
+  fileSize?: number;
 }
 
 interface SunoOfflineDB extends DBSchema {
@@ -141,6 +181,10 @@ export const upsertTracks = async (tracks: OfflineTrack[]) => {
     await tx.store.put(track);
   }
   await tx.done;
+};
+
+export const updateTrack = async (track: OfflineTrack): Promise<void> => {
+  await upsertTracks([track]);
 };
 
 export const upsertPlaylists = async (playlists: OfflinePlaylist[]) => {

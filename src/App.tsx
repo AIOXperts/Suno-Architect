@@ -7,7 +7,7 @@ import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, 
 import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1, APP_THEMES, APP_LAYOUTS } from './constants';
 import Footer from './components/Footer';
 import { SettingsModal } from './components/SettingsModal';
-import { getSunoCredits, updateSunoMetadata, getSunoFeed, getSunoFeedOfflineAware, getSunoClip, getSunoPlaylist } from './services/sunoApi';
+import { getSunoCredits, updateSunoMetadata, getSunoFeed, getSunoFeedOfflineAware, getSunoClip, getSunoPlaylist, isSunoUnauthorizedError } from './services/sunoApi';
 import { downloadAccountCache } from './services/offlineSyncService';
 import HistorySection from './components/HistorySection/HistorySection';
 import ActivityHistorySection from './components/ActivityHistorySection/ActivityHistorySection';
@@ -26,6 +26,7 @@ import {
   setApiKeyStorageMode,
 } from './utils/apiKeyStorage';
 import { deleteServerApiKey, getServerApiKey, setServerApiKey } from './services/keyVaultService';
+import { AUTH_BYPASS_ENABLED } from './services/authService';
 
 
 const VIEW_TABS: { key: ViewMode; label: string; icon?: React.ReactNode }[] = [
@@ -112,6 +113,20 @@ const VIEW_TABS: { key: ViewMode; label: string; icon?: React.ReactNode }[] = [
   },
 ];
 
+const LAST_VIEW_STORAGE_KEY = 'suno_last_view';
+const VIEW_QUERY_PARAM = 'view';
+
+const isViewMode = (value: string | null): value is ViewMode => {
+  if (!value) return false;
+  return VIEW_TABS.some((tab) => tab.key === value);
+};
+
+const getViewFromUrl = (): ViewMode | null => {
+  const params = new URLSearchParams(window.location.search);
+  const queryView = params.get(VIEW_QUERY_PARAM);
+  return isViewMode(queryView) ? queryView : null;
+};
+
 // Helper to map API response to SunoClip
 const mapSunoClip = (clip: any): SunoClip => {
     const metadata = clip.metadata || {};
@@ -165,7 +180,12 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
     result: null,
   });
 
-  const [view, setView] = useState<ViewMode>('generator');
+  const [view, setView] = useState<ViewMode>(() => {
+    const fromUrl = getViewFromUrl();
+    if (fromUrl) return fromUrl;
+    const saved = localStorage.getItem(LAST_VIEW_STORAGE_KEY);
+    return isViewMode(saved) ? saved : 'generator';
+  });
   const [appTheme, setAppTheme] = useState<AppTheme>(() => {
     const saved = localStorage.getItem('app_theme') as AppTheme | null;
     return saved && APP_THEMES.some(theme => theme.id === saved) ? saved : 'midnight';
@@ -239,6 +259,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
   const [sunoCookie, setSunoCookie] = useState('');
   const [sunoModel, setSunoModel] = useState('chirp-bluejay');
   const [sunoCredits, setSunoCredits] = useState<number | null>(null);
+  const [sunoConnectionState, setSunoConnectionState] = useState<'missing' | 'checking' | 'connected' | 'lost'>('missing');
   const [isSyncingHistory, setIsSyncingHistory] = useState(false);
   const [syncProgress, setSyncProgress] = useState('');
   const [useCachedData, setUseCachedData] = useState(false);
@@ -261,6 +282,32 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
   });
 
   const historyFetchedRef = useRef(false);
+  const verifyingSunoRef = useRef(false);
+
+  const verifySunoConnection = useCallback(async (cookie: string, opts?: { silent?: boolean }) => {
+    const trimmed = (cookie || '').trim();
+    if (!trimmed) {
+      setSunoConnectionState('missing');
+      setSunoCredits(null);
+      return;
+    }
+    if (!opts?.silent) {
+      setSunoConnectionState('checking');
+    }
+    if (verifyingSunoRef.current) return;
+    verifyingSunoRef.current = true;
+    try {
+      const credits = await getSunoCredits(trimmed);
+      setSunoCredits(credits);
+      setSunoConnectionState('connected');
+    } catch (error) {
+      console.error('Suno connection check failed', error);
+      setSunoCredits(null);
+      setSunoConnectionState('lost');
+    } finally {
+      verifyingSunoRef.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     const savedCookie = localStorage.getItem('suno_cookie');
@@ -269,7 +316,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
     
     if (savedCookie) {
       setSunoCookie(savedCookie);
-      getSunoCredits(savedCookie).then(setSunoCredits).catch(console.error);
+      verifySunoConnection(savedCookie);
       
       if (!historyFetchedRef.current) {
           historyFetchedRef.current = true;
@@ -283,7 +330,19 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
     if (savedLocalLibraryMode) {
       setUseCachedData(savedLocalLibraryMode === '1');
     }
-  }, []);
+  }, [verifySunoConnection]);
+
+  useEffect(() => {
+    if (!sunoCookie?.trim()) {
+      setSunoConnectionState('missing');
+      return;
+    }
+    verifySunoConnection(sunoCookie, { silent: true });
+    const timer = window.setInterval(() => {
+      verifySunoConnection(sunoCookie, { silent: true });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [sunoCookie, verifySunoConnection]);
 
   useEffect(() => {
     localStorage.setItem('local_library_mode', useCachedData ? '1' : '0');
@@ -305,6 +364,32 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
   useEffect(() => {
     localStorage.setItem('app_layout', appLayout);
   }, [appLayout]);
+
+  useEffect(() => {
+    localStorage.setItem(LAST_VIEW_STORAGE_KEY, view);
+
+    const current = new URL(window.location.href);
+    if (view === 'generator') {
+      current.searchParams.delete(VIEW_QUERY_PARAM);
+    } else {
+      current.searchParams.set(VIEW_QUERY_PARAM, view);
+    }
+
+    const nextUrl = `${current.pathname}${current.search}${current.hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) {
+      window.history.replaceState(null, '', nextUrl);
+    }
+  }, [view]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const fromUrl = getViewFromUrl();
+      setView(fromUrl || 'generator');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem('suno_history', JSON.stringify(history));
@@ -503,12 +588,13 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
 
     if (cookie) {
       localStorage.setItem('suno_cookie', cookie);
-      getSunoCredits(cookie).then(setSunoCredits).catch(() => setSunoCredits(null));
+      verifySunoConnection(cookie);
       historyFetchedRef.current = true;
       fetchAndMergeSunoHistory(cookie);
     } else {
       localStorage.removeItem('suno_cookie');
       setSunoCredits(null);
+      setSunoConnectionState('missing');
     }
 
     if (model) {
@@ -523,7 +609,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
 
   const handleSyncSuccess = async (response: any, originalData: ParsedSunoOutput) => {
     if (sunoCookie) {
-        getSunoCredits(sunoCookie).then(setSunoCredits).catch(console.error);
+        verifySunoConnection(sunoCookie, { silent: true });
     }
 
     if (response && response.clips && Array.isArray(response.clips)) {
@@ -853,6 +939,8 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
         onSignOut={onSignOut}
         sunoCredits={sunoCredits}
         providerConfig={providerConfig}
+        authBypassEnabled={AUTH_BYPASS_ENABLED}
+        sunoConnectionState={sunoConnectionState}
       />
 
       <SettingsModal
@@ -932,6 +1020,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
                   return (
                     <button
                       key={tab.key}
+                      data-view-tab={tab.key}
                       onClick={() => setView(tab.key)}
                       className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
                         isActive ? 'text-white shadow-lg' : 'text-slate-300 hover:text-white'
@@ -971,6 +1060,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
                 return (
                   <button
                     key={tab.key}
+                    data-view-tab={tab.key}
                     onClick={() => setView(tab.key)}
                     className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center gap-3 ${
                       isActive ? 'text-white shadow-lg' : 'text-slate-300 hover:text-white'
@@ -1012,6 +1102,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
                 return (
                   <button
                     key={tab.key}
+                    data-view-tab={tab.key}
                     onClick={() => setView(tab.key)}
                     className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${
                       isActive ? 'text-white shadow-lg' : 'text-slate-300 hover:text-white'

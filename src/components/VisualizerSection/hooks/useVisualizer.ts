@@ -1,11 +1,12 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { SunoClip, AlignedWord, Qt6Style } from '../../../types';
+import { SunoClip, AlignedWord, Qt6Style, AIProviderConfig } from '../../../types';
 import { getLyricAlignment, getSunoClip } from '../../../services/sunoApi';
 import { ASPECT_RATIOS } from '../../../constants';
 import { drawCover, drawQt6Visualizer, drawScrollingLyrics, drawCornerPulseVisualizer, drawLogoCircularWave, drawLogoExpandingCircle, drawLogoWatermark, type VisualizerFrameData } from '../../../utils/visualizer';
-import { groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords } from '../../../utils/lyrics';
+import { groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords, groupWordsByLrcWithText, generateLrc, parseLrc, detectLongLyricLines, detectLongLrcGaps } from '../../../utils/lyrics';
 import { performOfflineRender } from '../../../utils/offlineRender';
+import { createProvider, getDefaultModelForProvider, validateProviderConfig } from '../../../services/providers/providerFactory';
 
 type VisualMode = 'cover' | 'qt6' | 'hybrid';
 type VisualizerTemplate = 'classic' | 'clean-lyrics' | 'corner-pulse' | 'cinematic-bars';
@@ -50,6 +51,13 @@ type VisualizerConfig = {
     preRollType: 'text' | 'qr';
     preRollText: string;
     preRollSeconds: number;
+    preRollPreviewEnabled: boolean;
+    preRollPreviewStartSeconds: number;
+    preRollPreviewDurationSeconds: number;
+    preRollPreviewShowTitle: boolean;
+    preRollCardShowTitle: boolean;
+    preRollCardTitleText: string;
+    preRollCardTheme: 'clean' | 'bold';
     postRollEnabled: boolean;
     postRollType: 'text' | 'qr';
     postRollText: string;
@@ -64,17 +72,27 @@ type SavedVisualizerPreset = {
 
 const SESSION_KEY = 'suno_architect_visualizer_session_v1';
 const PRESET_KEY = 'suno_architect_visualizer_saved_presets_v1';
+const DEFAULT_LOGO_STORAGE_KEY = 'suno_architect_default_logo_v1';
+const CLIP_QUERY_PARAM = 'clipId';
 
 export const useVisualizer = (
     history: SunoClip[],
     sunoCookie: string | undefined,
     onUpdateClip: (id: string, updates: Partial<SunoClip>) => void,
     apiKey: string | undefined,
-    geminiModel: string | undefined
+    geminiModel: string | undefined,
+    providerConfig?: AIProviderConfig
 ) => {
+    const getClipIdFromUrl = useCallback((): string => {
+        const params = new URLSearchParams(window.location.search);
+        const id = (params.get(CLIP_QUERY_PARAM) || '').trim();
+        return id;
+    }, []);
+
     // Selection State
     const [selectedClipId, setSelectedClipId] = useState<string>('');
     const [manualId, setManualId] = useState('');
+    const [manualLoadVersion, setManualLoadVersion] = useState(0);
     
     // Visual Settings
     const [aspectRatio, setAspectRatio] = useState<keyof typeof ASPECT_RATIOS>("16:9");
@@ -102,11 +120,19 @@ export const useVisualizer = (
     const [preRollType, setPreRollType] = useState<'text' | 'qr'>('text');
     const [preRollText, setPreRollText] = useState('Thank you for supporting my work');
     const [preRollSeconds, setPreRollSeconds] = useState(4);
+    const [preRollPreviewEnabled, setPreRollPreviewEnabled] = useState(false);
+    const [preRollPreviewStartSeconds, setPreRollPreviewStartSeconds] = useState(20);
+    const [preRollPreviewDurationSeconds, setPreRollPreviewDurationSeconds] = useState(7);
+    const [preRollPreviewShowTitle, setPreRollPreviewShowTitle] = useState(true);
+    const [preRollCardShowTitle, setPreRollCardShowTitle] = useState(true);
+    const [preRollCardTitleText, setPreRollCardTitleText] = useState('');
+    const [preRollCardTheme, setPreRollCardTheme] = useState<'clean' | 'bold'>('clean');
     const [postRollEnabled, setPostRollEnabled] = useState(false);
     const [postRollType, setPostRollType] = useState<'text' | 'qr'>('text');
     const [postRollText, setPostRollText] = useState('Tripped Out Tim');
     const [postRollSeconds, setPostRollSeconds] = useState(4);
     const [imgSrc, setImgSrc] = useState<string>('');
+    const [hasDefaultLogo, setHasDefaultLogo] = useState(false);
 
     // Update video bitrate based on resolution
     useEffect(() => {
@@ -161,7 +187,10 @@ export const useVisualizer = (
     const [lines, setLines] = useState<AlignedWord[][]>([]);
     const [lyricSource, setLyricSource] = useState(''); 
     const [lyricDrafts, setLyricDrafts] = useState<Record<string, string>>({});
+    const [lrcDraft, setLrcDraft] = useState('');
+    const [lrcDrafts, setLrcDrafts] = useState<Record<string, string>>({});
     const [applyStatus, setApplyStatus] = useState<'idle' | 'applied'>('idle');
+    const [lrcApplyStatus, setLrcApplyStatus] = useState<'idle' | 'applied' | 'error'>('idle');
     const [savedPresets, setSavedPresets] = useState<SavedVisualizerPreset[]>([]);
     
     // Audio/Canvas/Media References
@@ -194,13 +223,35 @@ export const useVisualizer = (
     const [isPreparing, setIsPreparing] = useState(false);
     const [isGrouping, setIsGrouping] = useState(false);
     const [progress, setProgress] = useState(0); 
-    const [duration, setDuration] = useState(0);
+    const [audioDuration, setAudioDuration] = useState(0);
     const [isPlaying, setIsPlaying] = useState(false);
 
     const renderStartTimeRef = useRef(0);
     const lastSpeedUpdateRef = useRef(0);
+    const previewPhaseRef = useRef<'idle' | 'preroll' | 'audio' | 'postroll'>('idle');
+    const previewPhaseStartMsRef = useRef(0);
+    const previewPhaseStartVirtualRef = useRef(0);
     const hasRestoredSessionRef = useRef(false);
     const lyricDraftsRef = useRef<Record<string, string>>({});
+    const lrcDraftsRef = useRef<Record<string, string>>({});
+    const preferLegacyOnNextLoadRef = useRef(false);
+    const historyRef = useRef<SunoClip[]>(history);
+
+    const preRollDuration = preRollEnabled ? Math.max(0, Math.min(15, preRollSeconds)) : 0;
+    const postRollDuration = postRollEnabled ? Math.max(0, Math.min(15, postRollSeconds)) : 0;
+    const totalPreviewDuration = Math.max(0, audioDuration) + preRollDuration + postRollDuration;
+
+    const rebuildLinesFromSources = useCallback((nextAlignment: AlignedWord[], preferredLrcOverride?: string) => {
+        const candidateLrc = typeof preferredLrcOverride === 'string' ? preferredLrcOverride : lrcDraft;
+        const parsed = parseLrc(candidateLrc);
+        if (candidateLrc.trim() && parsed.entries.length > 0 && parsed.invalidLineNumbers.length === 0) {
+            return groupWordsByLrcWithText(nextAlignment, candidateLrc);
+        }
+        if (lyricSource.trim()) {
+            return matchWordsToPrompt(nextAlignment, lyricSource);
+        }
+        return groupWordsByTiming(nextAlignment);
+    }, [lrcDraft, lyricSource]);
 
     useEffect(() => {
         try {
@@ -210,11 +261,21 @@ export const useVisualizer = (
                     selectedClipId: string;
                     manualId: string;
                     lyricDrafts: Record<string, string>;
+                    lrcDrafts: Record<string, string>;
+                    logoAsset: { url: string; name: string } | null;
                     config: Partial<VisualizerConfig>;
                 }>;
-                if (session.selectedClipId) setSelectedClipId(session.selectedClipId);
-                if (session.manualId) setManualId(session.manualId);
+                const urlClipId = getClipIdFromUrl();
+                if (urlClipId) {
+                    setSelectedClipId(urlClipId);
+                    setManualId(urlClipId);
+                } else {
+                    if (session.selectedClipId) setSelectedClipId(session.selectedClipId);
+                    if (session.manualId) setManualId(session.manualId);
+                }
                 if (session.lyricDrafts) setLyricDrafts(session.lyricDrafts);
+                if (session.lrcDrafts) setLrcDrafts(session.lrcDrafts);
+                if (session.logoAsset?.url) setLogoAsset(session.logoAsset);
                 if (session.config) {
                     if (session.config.aspectRatio) setAspectRatio(session.config.aspectRatio);
                     if (typeof session.config.showBackgroundLayer === 'boolean') {
@@ -261,6 +322,13 @@ export const useVisualizer = (
                     if (session.config.preRollType) setPreRollType(session.config.preRollType);
                     if (typeof session.config.preRollText === 'string') setPreRollText(session.config.preRollText);
                     if (typeof session.config.preRollSeconds === 'number') setPreRollSeconds(session.config.preRollSeconds);
+                    if (typeof session.config.preRollPreviewEnabled === 'boolean') setPreRollPreviewEnabled(session.config.preRollPreviewEnabled);
+                    if (typeof session.config.preRollPreviewStartSeconds === 'number') setPreRollPreviewStartSeconds(session.config.preRollPreviewStartSeconds);
+                    if (typeof session.config.preRollPreviewDurationSeconds === 'number') setPreRollPreviewDurationSeconds(session.config.preRollPreviewDurationSeconds);
+                    if (typeof session.config.preRollPreviewShowTitle === 'boolean') setPreRollPreviewShowTitle(session.config.preRollPreviewShowTitle);
+                    if (typeof session.config.preRollCardShowTitle === 'boolean') setPreRollCardShowTitle(session.config.preRollCardShowTitle);
+                    if (typeof session.config.preRollCardTitleText === 'string') setPreRollCardTitleText(session.config.preRollCardTitleText);
+                    if (session.config.preRollCardTheme === 'clean' || session.config.preRollCardTheme === 'bold') setPreRollCardTheme(session.config.preRollCardTheme);
                     if (typeof session.config.postRollEnabled === 'boolean') setPostRollEnabled(session.config.postRollEnabled);
                     if (session.config.postRollType) setPostRollType(session.config.postRollType);
                     if (typeof session.config.postRollText === 'string') setPostRollText(session.config.postRollText);
@@ -282,8 +350,64 @@ export const useVisualizer = (
         } catch (err) {
             console.warn('Failed to restore saved presets:', err);
         }
-        hasRestoredSessionRef.current = true;
-    }, []);
+
+        if (!localStorage.getItem(SESSION_KEY)) {
+            const urlClipId = getClipIdFromUrl();
+            if (urlClipId) {
+                setSelectedClipId(urlClipId);
+                setManualId(urlClipId);
+            }
+        }
+
+        try {
+            const rawDefaultLogo = localStorage.getItem(DEFAULT_LOGO_STORAGE_KEY);
+            if (rawDefaultLogo) {
+                const parsed = JSON.parse(rawDefaultLogo) as { name?: string; dataUrl?: string };
+                if (typeof parsed?.dataUrl === 'string' && parsed.dataUrl.startsWith('data:image/')) {
+                    setHasDefaultLogo(true);
+                    setLogoAsset(prev => prev || {
+                        url: parsed.dataUrl,
+                        name: parsed.name || 'default-logo'
+                    });
+                }
+            }
+        } catch (err) {
+            console.warn('Failed to restore default logo:', err);
+        }
+        const readyTimer = window.setTimeout(() => {
+            hasRestoredSessionRef.current = true;
+        }, 0);
+
+        return () => window.clearTimeout(readyTimer);
+    }, [getClipIdFromUrl]);
+
+    useEffect(() => {
+        const next = (selectedClipId || '').trim();
+        const current = new URL(window.location.href);
+        const existing = (current.searchParams.get(CLIP_QUERY_PARAM) || '').trim();
+        if (next) {
+            current.searchParams.set(CLIP_QUERY_PARAM, next);
+        } else {
+            current.searchParams.delete(CLIP_QUERY_PARAM);
+        }
+        const nextUrl = `${current.pathname}${current.search}${current.hash}`;
+        const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (next !== existing && nextUrl !== currentUrl) {
+            window.history.replaceState(null, '', nextUrl);
+        }
+    }, [selectedClipId]);
+
+    useEffect(() => {
+        const handlePopState = () => {
+            const next = getClipIdFromUrl();
+            setSelectedClipId(prev => (prev === next ? prev : next));
+            if (next) {
+                setManualId(next);
+            }
+        };
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, [getClipIdFromUrl]);
 
     const currentVisualMode: VisualMode = showBackgroundLayer
         ? (mainVisualizerEnabled ? 'hybrid' : 'cover')
@@ -354,12 +478,22 @@ export const useVisualizer = (
     // Load Clip Data
     useEffect(() => {
         if (!selectedClipId) return;
-        setLines([]); 
+        let cancelled = false;
+        setLines([]);
+        setAlignment(null);
+        setClipData(null);
+        setLyricSource('');
+        setLrcDraft('');
         setApplyStatus('idle');
+        setLrcApplyStatus('idle');
         setCustomAudio(null);
+        setProgress(0);
+        setAudioDuration(0);
+        setIsPlaying(false);
+        previewPhaseRef.current = 'idle';
 
         const loadData = async () => {
-            let currentClip = history.find(c => c.id === selectedClipId);
+            let currentClip = historyRef.current.find(c => c.id === selectedClipId);
             let fetchedData: any = null;
 
             if (sunoCookie && !selectedClipId.startsWith('draft_')) {
@@ -370,6 +504,8 @@ export const useVisualizer = (
                     console.warn("Could not fetch clip details, using local/fallback", e);
                 }
             }
+
+            if (cancelled) return;
 
             if (fetchedData) {
                 const meta = fetchedData.metadata || {};
@@ -387,7 +523,9 @@ export const useVisualizer = (
                     originalData: currentClip?.originalData || {
                         style: tags, title: fetchedData.title || '', excludeStyles: '', advancedParams: '', vocalGender: '', weirdness: 50, styleInfluence: 50, lyricsWithTags: prompt, lyricsAlone: prompt.replace(/\[[\s\S]*?\]/g, "").trim(), fullResponse: ''
                     },
-                    alignmentData: currentClip?.alignmentData 
+                    alignmentData: currentClip?.alignmentData,
+                    lrcContent: currentClip?.lrcContent,
+                    srtContent: currentClip?.srtContent
                 };
             } else if (!currentClip) {
                 currentClip = {
@@ -399,7 +537,8 @@ export const useVisualizer = (
                     metadata: { tags: '', prompt: '' }
                 };
             }
-            
+
+            if (cancelled) return;
             setClipData(currentClip);
 
             let sourceText = currentClip.metadata?.prompt || "";
@@ -411,6 +550,9 @@ export const useVisualizer = (
                 sourceText = draftText;
             }
             setLyricSource(sourceText);
+            const clipLrcDraft = lrcDraftsRef.current[currentClip.id];
+            setLrcDraft(typeof clipLrcDraft === 'string' ? clipLrcDraft : (currentClip.lrcContent || ''));
+            setLrcApplyStatus('idle');
 
             let align = currentClip.alignmentData;
             if (!align && sunoCookie && !currentClip.id.startsWith('draft_')) {
@@ -419,7 +561,7 @@ export const useVisualizer = (
                     const res = await getLyricAlignment(currentClip.id, sunoCookie);
                     if (res && res.aligned_words) {
                         align = res.aligned_words;
-                        if (history.some(h => h.id === currentClip.id)) {
+                        if (historyRef.current.some(h => h.id === currentClip.id)) {
                             onUpdateClip(currentClip.id, { alignmentData: align });
                         }
                     }
@@ -427,26 +569,64 @@ export const useVisualizer = (
                     console.error("Alignment fetch failed", e);
                 }
             }
+
+            if (cancelled) return;
             setAlignment(align || null);
 
             if (align) {
-                let autoLines;
-                if (sourceText) {
-                    autoLines = matchWordsToPrompt(align, sourceText);
-                } else {
-                    autoLines = groupWordsByTiming(align);
-                }
+                const shouldPreferLegacy = preferLegacyOnNextLoadRef.current;
+                const preferredLrc = (typeof clipLrcDraft === 'string' && clipLrcDraft.trim())
+                    ? clipLrcDraft
+                    : (currentClip.lrcContent || '');
+
+                const autoLines = shouldPreferLegacy
+                    ? (sourceText.trim() ? matchWordsToPrompt(align, sourceText) : groupWordsByTiming(align))
+                    : (() => {
+                        const parsed = parseLrc(preferredLrc);
+                        if (preferredLrc.trim() && parsed.entries.length > 0 && parsed.invalidLineNumbers.length === 0) {
+                            return groupWordsByLrcWithText(align, preferredLrc);
+                        }
+                        if (sourceText.trim()) {
+                            return matchWordsToPrompt(align, sourceText);
+                        }
+                        return groupWordsByTiming(align);
+                    })();
+
                 setLines(autoLines);
+                if (!preferredLrc.trim() && autoLines.length > 0) {
+                    setLrcDraft(generateLrc(autoLines));
+                }
             }
 
-            setIsPreparing(false);
+            preferLegacyOnNextLoadRef.current = false;
+            if (!cancelled) setIsPreparing(false);
         };
 
         loadData();
-    }, [selectedClipId, history, sunoCookie, onUpdateClip]);
+        return () => {
+            cancelled = true;
+        };
+    }, [selectedClipId, manualLoadVersion, sunoCookie, onUpdateClip]);
 
     const handleManualLoad = useCallback(() => {
-        if (manualId.trim()) setSelectedClipId(manualId.trim());
+        const nextId = manualId.trim();
+        if (!nextId) return;
+
+        preferLegacyOnNextLoadRef.current = true;
+        setLines([]);
+        setAlignment(null);
+        setClipData(null);
+        setLyricSource('');
+        setLrcDraft('');
+        setApplyStatus('idle');
+        setLrcApplyStatus('idle');
+        setCustomAudio(null);
+        setProgress(0);
+        setAudioDuration(0);
+        setIsPlaying(false);
+        previewPhaseRef.current = 'idle';
+        setSelectedClipId(nextId);
+        setManualLoadVersion(prev => prev + 1);
     }, [manualId]);
 
     const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -465,9 +645,36 @@ export const useVisualizer = (
     const handleLogoUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
-            const url = URL.createObjectURL(file);
-            setLogoAsset({ url, name: file.name });
+            const reader = new FileReader();
+            reader.onload = () => {
+                if (typeof reader.result === 'string') {
+                    setLogoAsset({ url: reader.result, name: file.name });
+                }
+            };
+            reader.readAsDataURL(file);
         }
+    }, []);
+
+    const handleSetLogoAsDefault = useCallback(async () => {
+        if (!logoAsset?.url) return;
+        let dataUrl = logoAsset.url;
+        if (!dataUrl.startsWith('data:image/')) {
+            const res = await fetch(dataUrl);
+            const blob = await res.blob();
+            dataUrl = await new Promise<string>((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => reject(new Error('Failed to read logo file.'));
+                reader.readAsDataURL(blob);
+            });
+        }
+        localStorage.setItem(DEFAULT_LOGO_STORAGE_KEY, JSON.stringify({ name: logoAsset.name, dataUrl }));
+        setHasDefaultLogo(true);
+    }, [logoAsset]);
+
+    const handleClearDefaultLogo = useCallback(() => {
+        localStorage.removeItem(DEFAULT_LOGO_STORAGE_KEY);
+        setHasDefaultLogo(false);
     }, []);
 
     const handleAudioUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -489,6 +696,78 @@ export const useVisualizer = (
         setApplyStatus('applied');
         setTimeout(() => setApplyStatus('idle'), 2000);
     }, [alignment, lyricSource]);
+
+    const handleApplyLrc = useCallback(() => {
+        if (!alignment) return;
+        const parsed = parseLrc(lrcDraft);
+        if (parsed.invalidLineNumbers.length > 0) {
+            setLrcApplyStatus('error');
+            setTimeout(() => setLrcApplyStatus('idle'), 2500);
+            alert(
+                `LRC has non-empty lines without timestamps (line${parsed.invalidLineNumbers.length > 1 ? 's' : ''} ${parsed.invalidLineNumbers.slice(0, 10).join(', ')}${parsed.invalidLineNumbers.length > 10 ? '…' : ''}). ` +
+                `Add [mm:ss.xx] to every lyric line before applying.`
+            );
+            return;
+        }
+        if (!lrcDraft.trim() || parsed.entries.length === 0) {
+            setLrcApplyStatus('error');
+            setTimeout(() => setLrcApplyStatus('idle'), 2000);
+            alert('No valid LRC timestamps found to apply.');
+            return;
+        }
+        const lrcLines = groupWordsByLrcWithText(alignment, lrcDraft);
+        if (lrcLines.length === 0) {
+            setLrcApplyStatus('error');
+            setTimeout(() => setLrcApplyStatus('idle'), 2000);
+            alert('LRC parsed, but no aligned words matched the timestamp ranges.');
+            return;
+        }
+        setLines(lrcLines);
+        const parsedTextLines = parsed.entries.map(e => e.text).filter(Boolean).join('\n');
+        if (parsedTextLines.trim()) {
+            setLyricSource(parsedTextLines);
+        }
+        setLrcApplyStatus('applied');
+        if (clipData) {
+            onUpdateClip(clipData.id, { lrcContent: lrcDraft });
+            setClipData(prev => prev ? ({ ...prev, lrcContent: lrcDraft }) : prev);
+        }
+        setTimeout(() => setLrcApplyStatus('idle'), 2000);
+    }, [alignment, lrcDraft, clipData, onUpdateClip]);
+
+    const handleGenerateLrcFromCurrentLines = useCallback(() => {
+        if (!lines.length) return;
+        const nextLrc = generateLrc(lines);
+        setLrcDraft(nextLrc);
+        if (clipData) {
+            onUpdateClip(clipData.id, { lrcContent: nextLrc });
+            setClipData(prev => prev ? ({ ...prev, lrcContent: nextLrc }) : prev);
+        }
+        setLrcApplyStatus('applied');
+        setTimeout(() => setLrcApplyStatus('idle'), 1500);
+    }, [lines, clipData, onUpdateClip]);
+
+    const handleReplaceAlignment = useCallback((nextAlignment: AlignedWord[]) => {
+        const normalized = nextAlignment.map((w) => {
+            const start_s = Number.isFinite(w.start_s) ? Math.max(0, w.start_s) : 0;
+            const endRaw = Number.isFinite(w.end_s) ? w.end_s : (start_s + 0.05);
+            const end_s = Math.max(start_s + 0.01, endRaw);
+            return {
+                ...w,
+                word: String(w.word ?? ''),
+                start_s,
+                end_s
+            };
+        });
+
+        setAlignment(normalized);
+        setLines(rebuildLinesFromSources(normalized));
+
+        if (clipData) {
+            onUpdateClip(clipData.id, { alignmentData: normalized });
+            setClipData(prev => prev ? ({ ...prev, alignmentData: normalized }) : prev);
+        }
+    }, [clipData, onUpdateClip, rebuildLinesFromSources]);
 
     const getCurrentConfig = useCallback((): VisualizerConfig => ({
         aspectRatio,
@@ -527,6 +806,13 @@ export const useVisualizer = (
         preRollType,
         preRollText,
         preRollSeconds,
+        preRollPreviewEnabled,
+        preRollPreviewStartSeconds,
+        preRollPreviewDurationSeconds,
+        preRollPreviewShowTitle,
+        preRollCardShowTitle,
+        preRollCardTitleText,
+        preRollCardTheme,
         postRollEnabled,
         postRollType,
         postRollText,
@@ -536,7 +822,7 @@ export const useVisualizer = (
         smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, qt6SpectrogramSpeed, qt6ParticleDensity, qt6RingCount, qt6LedSegments, qt6SpectrogramPalette,
         logoPosition, logoScale, logoOpacity, logoPulseEnabled, logoPulseStyle, logoPulseGap, logoPulseScale, logoPulseSensitivity, showTitle,
         videoBitrate, videoBitrateMode, audioBitrate, fps,
-        outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, postRollEnabled, postRollType, postRollText, postRollSeconds
+        outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, preRollPreviewEnabled, preRollPreviewStartSeconds, preRollPreviewDurationSeconds, preRollPreviewShowTitle, preRollCardShowTitle, preRollCardTitleText, preRollCardTheme, postRollEnabled, postRollType, postRollText, postRollSeconds
     ]);
 
     const applyConfig = useCallback((config: any) => {
@@ -580,6 +866,13 @@ export const useVisualizer = (
         if (config.preRollType) setPreRollType(config.preRollType);
         if (typeof config.preRollText === 'string') setPreRollText(config.preRollText);
         if (typeof config.preRollSeconds === 'number') setPreRollSeconds(config.preRollSeconds);
+        if (typeof config.preRollPreviewEnabled === 'boolean') setPreRollPreviewEnabled(config.preRollPreviewEnabled);
+        if (typeof config.preRollPreviewStartSeconds === 'number') setPreRollPreviewStartSeconds(config.preRollPreviewStartSeconds);
+        if (typeof config.preRollPreviewDurationSeconds === 'number') setPreRollPreviewDurationSeconds(config.preRollPreviewDurationSeconds);
+        if (typeof config.preRollPreviewShowTitle === 'boolean') setPreRollPreviewShowTitle(config.preRollPreviewShowTitle);
+        if (typeof config.preRollCardShowTitle === 'boolean') setPreRollCardShowTitle(config.preRollCardShowTitle);
+        if (typeof config.preRollCardTitleText === 'string') setPreRollCardTitleText(config.preRollCardTitleText);
+        if (config.preRollCardTheme === 'clean' || config.preRollCardTheme === 'bold') setPreRollCardTheme(config.preRollCardTheme);
         if (typeof config.postRollEnabled === 'boolean') setPostRollEnabled(config.postRollEnabled);
         if (config.postRollType) setPostRollType(config.postRollType);
         if (typeof config.postRollText === 'string') setPostRollText(config.postRollText);
@@ -786,11 +1079,37 @@ export const useVisualizer = (
     }, [lyricDrafts]);
 
     useEffect(() => {
+        historyRef.current = history;
+    }, [history]);
+
+    useEffect(() => {
+        if (!selectedClipId) return;
+        setLrcDrafts(prev => {
+            if (prev[selectedClipId] === lrcDraft) return prev;
+            return { ...prev, [selectedClipId]: lrcDraft };
+        });
+    }, [selectedClipId, lrcDraft]);
+
+    useEffect(() => {
+        const parsed = parseLrc(lrcDraft);
+        if (parsed.entries.length === 0) return;
+        const nextLyricSource = parsed.entries.map(entry => entry.text).join('\n').trim();
+        if (!nextLyricSource) return;
+        setLyricSource(prev => (prev === nextLyricSource ? prev : nextLyricSource));
+    }, [lrcDraft]);
+
+    useEffect(() => {
+        lrcDraftsRef.current = lrcDrafts;
+    }, [lrcDrafts]);
+
+    useEffect(() => {
         if (!hasRestoredSessionRef.current) return;
         const session = {
             selectedClipId,
             manualId,
             lyricDrafts,
+            lrcDrafts,
+            logoAsset,
             config: getCurrentConfig()
         };
         try {
@@ -798,7 +1117,7 @@ export const useVisualizer = (
         } catch (err) {
             console.warn('Failed to persist visualizer session:', err);
         }
-    }, [selectedClipId, manualId, lyricDrafts, getCurrentConfig]);
+    }, [selectedClipId, manualId, lyricDrafts, lrcDrafts, logoAsset, getCurrentConfig]);
 
     useEffect(() => {
         if (!hasRestoredSessionRef.current) return;
@@ -821,9 +1140,56 @@ export const useVisualizer = (
             const cleanAligned = getCleanAlignedWords(alignment);
             const pseudoLines = matchWordsToPrompt(alignment, lyricSource);
             setLines(pseudoLines);
-            const grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel, pseudoLines);
+            let grouped: AlignedWord[][] = [];
+
+            if (providerConfig && validateProviderConfig(providerConfig)) {
+                const provider = createProvider(providerConfig);
+                const model = providerConfig.model || getDefaultModelForProvider(providerConfig.type);
+                const response = await provider.generateContent({
+                    model,
+                    temperature: 0.1,
+                    responseMimeType: 'application/json',
+                    systemInstruction: 'Return strict JSON only. Output an object: {"lines":[[{"word":"...","start":0,"end":0}]]}.',
+                    contents: `
+Task: Group a list of synchronized words into arrays that represent lyric lines.
+Use the LYRICS as ground truth for line breaks. Preserve timing values from SYNCED WORDS.
+
+LYRICS:
+${cleanLyrics}
+
+SYNCED WORDS (JSON):
+${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w.end_s })))}
+                    `.trim(),
+                    timeoutMs: 90000
+                });
+
+                const parsed = JSON.parse(response.text || '{}');
+                const rawLines = Array.isArray(parsed) ? parsed : parsed?.lines;
+                if (Array.isArray(rawLines)) {
+                    grouped = rawLines.map((line: any[]) =>
+                        Array.isArray(line)
+                            ? line.map((item: any) => ({
+                                word: String(item?.word ?? ''),
+                                start_s: Number(item?.start ?? item?.start_s ?? 0),
+                                end_s: Number(item?.end ?? item?.end_s ?? 0),
+                                success: true,
+                                p_align: 1
+                            })).filter((w: AlignedWord) => w.word)
+                            : []
+                    ).filter((line: AlignedWord[]) => line.length > 0);
+                }
+            } else if (apiKey) {
+                // Backward-compat Gemini-only path
+                grouped = await groupLyricsByLines(cleanLyrics, cleanAligned, apiKey, geminiModel, pseudoLines);
+            } else {
+                alert('Refine Lines with AI requires a configured AI provider (e.g., OpenRouter/Gemini) with model + key.');
+                return;
+            }
+
             if (grouped && grouped.length > 0) {
                 setLines(grouped);
+            } else {
+                alert("AI refine returned no usable line groups. Kept prompt-based grouping.");
             }
         } catch (e) {
             console.error(e);
@@ -833,34 +1199,94 @@ export const useVisualizer = (
         }
     };
 
-    const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const time = parseFloat(e.target.value);
-        if (audioRef.current) {
-            audioRef.current.currentTime = time;
-            setProgress(time);
+    const clampTimeline = useCallback((value: number) => {
+        return Math.max(0, Math.min(totalPreviewDuration || 0, value));
+    }, [totalPreviewDuration]);
+
+    const mapPreviewToSongTime = useCallback((timelineTime: number) => {
+        if (audioDuration <= 0) return 0;
+        const songWindowStart = preRollDuration;
+        const songWindowEnd = preRollDuration + audioDuration;
+        if (timelineTime < songWindowStart) {
+            if (preRollPreviewEnabled) {
+                const previewStart = Math.max(0, preRollPreviewStartSeconds);
+                const previewDur = Math.max(0.1, Math.min(10, preRollPreviewDurationSeconds));
+                const offset = Math.max(0, timelineTime);
+                const looped = previewStart + (offset % previewDur);
+                return Math.min(audioDuration, looped);
+            }
+            return 0;
         }
-    }, []);
+        if (timelineTime > songWindowEnd) return audioDuration;
+        return Math.max(0, Math.min(audioDuration, timelineTime - preRollDuration));
+    }, [audioDuration, preRollDuration, preRollPreviewEnabled, preRollPreviewDurationSeconds, preRollPreviewStartSeconds]);
+
+    const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+        const timelineTime = clampTimeline(parseFloat(e.target.value));
+        setProgress(timelineTime);
+
+        if (!audioRef.current) return;
+        const songTime = mapPreviewToSongTime(timelineTime);
+        audioRef.current.currentTime = songTime;
+        if (timelineTime < preRollDuration || timelineTime > preRollDuration + audioDuration) {
+            audioRef.current.pause();
+            previewPhaseRef.current = 'idle';
+        } else {
+            previewPhaseRef.current = audioRef.current.paused ? 'idle' : 'audio';
+        }
+    }, [audioDuration, clampTimeline, mapPreviewToSongTime, preRollDuration]);
 
     const togglePlay = useCallback(() => {
-        if (audioRef.current) {
-            if (audioRef.current.paused) {
-                if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                    audioContextRef.current.resume().catch(console.error);
-                }
-                const p = audioRef.current.play();
-                if (p !== undefined) {
-                    p.catch(e => {
-                        console.error("Playback error:", e);
-                        setIsPlaying(false);
-                    });
-                }
-                // State update handled by event listeners in component
-            } else {
-                audioRef.current.pause();
-                // State update handled by event listeners in component
-            }
+        const audio = audioRef.current;
+        if (!audio) return;
+
+        const startPreRollPlayback = () => {
+            previewPhaseRef.current = 'preroll';
+            previewPhaseStartMsRef.current = performance.now();
+            previewPhaseStartVirtualRef.current = progress;
+            audio.pause();
+            setIsPlaying(true);
+        };
+
+        const startPostRollPlayback = () => {
+            previewPhaseRef.current = 'postroll';
+            previewPhaseStartMsRef.current = performance.now();
+            previewPhaseStartVirtualRef.current = progress;
+            audio.pause();
+            setIsPlaying(true);
+        };
+
+        if (isPlaying) {
+            previewPhaseRef.current = 'idle';
+            audio.pause();
+            setIsPlaying(false);
+            return;
         }
-    }, []);
+
+        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+            audioContextRef.current.resume().catch(console.error);
+        }
+
+        if (progress < preRollDuration && preRollDuration > 0) {
+            startPreRollPlayback();
+            return;
+        }
+        if (progress > preRollDuration + audioDuration && postRollDuration > 0) {
+            startPostRollPlayback();
+            return;
+        }
+
+        previewPhaseRef.current = 'audio';
+        audio.currentTime = mapPreviewToSongTime(progress);
+        const p = audio.play();
+        if (p !== undefined) {
+            p.catch(e => {
+                console.error("Playback error:", e);
+                setIsPlaying(false);
+                previewPhaseRef.current = 'idle';
+            });
+        }
+    }, [audioDuration, isPlaying, mapPreviewToSongTime, postRollDuration, preRollDuration, progress]);
 
     // --- DRAWING LOGIC ---
     const resolveVisualizerData = (data?: VisualizerFrameData): VisualizerFrameData | null => {
@@ -934,6 +1360,88 @@ export const useVisualizer = (
             return { x: width - margin - logoSizePx, y: margin, size: logoSizePx };
         }
         return { x: width - margin - logoSizePx, y: height - margin - logoSizePx, size: logoSizePx };
+    };
+
+    const drawRollPreviewCard = (
+        ctx: CanvasRenderingContext2D,
+        width: number,
+        height: number,
+        type: 'text' | 'qr',
+        text: string,
+        heading: string,
+        includeTitle: boolean,
+        titleText?: string,
+        theme: 'clean' | 'bold' = 'clean'
+    ) => {
+        ctx.save();
+        const isBold = theme === 'bold';
+        ctx.fillStyle = isBold ? 'rgba(12, 10, 34, 0.78)' : 'rgba(3, 7, 18, 0.72)';
+        ctx.fillRect(0, 0, width, height);
+
+        const pad = Math.max(24, Math.round(width * 0.06));
+        const panelWidth = Math.min(width - pad * 2, Math.round(width * 0.88));
+        const panelHeight = Math.min(height - pad * 2, Math.round(height * 0.7));
+        const panelX = (width - panelWidth) / 2;
+        const panelY = (height - panelHeight) / 2;
+
+        ctx.fillStyle = isBold ? 'rgba(30, 27, 75, 0.86)' : 'rgba(15, 23, 42, 0.88)';
+        ctx.strokeStyle = isBold ? 'rgba(236, 72, 153, 0.55)' : 'rgba(148, 163, 184, 0.35)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(panelX, panelY, panelWidth, panelHeight, 18);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = `700 ${Math.max(22, Math.round(width * 0.035))}px Inter, Arial, sans-serif`;
+        ctx.fillText(heading, width / 2, panelY + Math.max(18, Math.round(panelHeight * 0.08)));
+
+        const effectiveTitle = (titleText || '').trim() || clipData?.title?.trim() || '';
+        if (includeTitle && effectiveTitle) {
+            ctx.fillStyle = 'rgba(186, 230, 253, 0.92)';
+            ctx.font = `600 ${Math.max(18, Math.round(width * 0.026))}px Inter, Arial, sans-serif`;
+            ctx.fillText(effectiveTitle, width / 2, panelY + Math.max(56, Math.round(panelHeight * 0.22)));
+        }
+
+        if (type === 'qr') {
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = `600 ${Math.max(18, Math.round(width * 0.025))}px Inter, Arial, sans-serif`;
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text?.trim() || 'QR Link', width / 2, panelY + (panelHeight * 0.66));
+        } else {
+            const message = text?.trim() || ' ';
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = `500 ${Math.max(20, Math.round(width * 0.024))}px Inter, Arial, sans-serif`;
+            ctx.textBaseline = 'middle';
+
+            const maxWidth = panelWidth * 0.82;
+            const words = message.split(/\s+/).filter(Boolean);
+            const lines: string[] = [];
+            let current = '';
+
+            for (const word of words) {
+                const next = current ? `${current} ${word}` : word;
+                if (ctx.measureText(next).width <= maxWidth) {
+                    current = next;
+                } else {
+                    if (current) lines.push(current);
+                    current = word;
+                }
+            }
+            if (current) lines.push(current);
+
+            const lineHeight = Math.max(28, Math.round(width * 0.032));
+            const totalHeight = lines.length * lineHeight;
+            let y = panelY + (panelHeight * 0.62) - totalHeight / 2 + lineHeight / 2;
+            for (const line of lines.slice(0, 6)) {
+                ctx.fillText(line, width / 2, y);
+                y += lineHeight;
+            }
+        }
+
+        ctx.restore();
     };
 
     const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, data?: VisualizerFrameData) => {
@@ -1078,12 +1586,85 @@ export const useVisualizer = (
         }
 
         if (!isRendering && audioRef.current && canvas && ctx) {
+            const audio = audioRef.current;
+            const now = performance.now();
+            let virtualTime = progress;
+
+            if (previewPhaseRef.current === 'preroll') {
+                const elapsed = (now - previewPhaseStartMsRef.current) / 1000;
+                virtualTime = clampTimeline(previewPhaseStartVirtualRef.current + elapsed);
+                if (virtualTime >= preRollDuration) {
+                    previewPhaseRef.current = 'audio';
+                    virtualTime = preRollDuration;
+                    audio.currentTime = 0;
+                    const p = audio.play();
+                    if (p !== undefined) {
+                        p.catch(() => {
+                            previewPhaseRef.current = 'idle';
+                            setIsPlaying(false);
+                        });
+                    }
+                }
+            } else if (previewPhaseRef.current === 'postroll') {
+                const elapsed = (now - previewPhaseStartMsRef.current) / 1000;
+                virtualTime = clampTimeline(previewPhaseStartVirtualRef.current + elapsed);
+                if (virtualTime >= totalPreviewDuration) {
+                    virtualTime = totalPreviewDuration;
+                    previewPhaseRef.current = 'idle';
+                    setIsPlaying(false);
+                    audio.pause();
+                }
+            } else {
+                if (previewPhaseRef.current === 'audio' || (!audio.paused && !audio.ended && isPlaying)) {
+                    virtualTime = clampTimeline(preRollDuration + audio.currentTime);
+                } else {
+                    // Keep the explicit timeline position while idle/paused.
+                    virtualTime = clampTimeline(progress);
+                }
+                if (isPlaying && audio.ended) {
+                    if (postRollDuration > 0) {
+                        previewPhaseRef.current = 'postroll';
+                        previewPhaseStartMsRef.current = now;
+                        previewPhaseStartVirtualRef.current = preRollDuration + audioDuration;
+                        virtualTime = previewPhaseStartVirtualRef.current;
+                    } else {
+                        previewPhaseRef.current = 'idle';
+                        setIsPlaying(false);
+                    }
+                }
+            }
+
+            const songTime = mapPreviewToSongTime(virtualTime);
             const dims = ASPECT_RATIOS[aspectRatio];
-            renderFrame(ctx, dims.width, dims.height, audioRef.current.currentTime);
-            setProgress(audioRef.current.currentTime);
+            renderFrame(ctx, dims.width, dims.height, songTime);
+            if (virtualTime < preRollDuration && preRollDuration > 0 && preRollEnabled) {
+                drawRollPreviewCard(
+                    ctx,
+                    dims.width,
+                    dims.height,
+                    preRollType,
+                    preRollText,
+                    preRollPreviewEnabled ? 'Preview Intro' : 'Pre-Roll',
+                    preRollCardShowTitle || (preRollPreviewEnabled && preRollPreviewShowTitle),
+                    preRollCardTitleText,
+                    preRollCardTheme
+                );
+            } else if (virtualTime > preRollDuration + audioDuration && postRollDuration > 0 && postRollEnabled) {
+                drawRollPreviewCard(
+                    ctx,
+                    dims.width,
+                    dims.height,
+                    postRollType,
+                    postRollText,
+                    'Post-Roll',
+                    false
+                );
+            }
+
+            setProgress(virtualTime);
             requestRef.current = requestAnimationFrame(animate);
         }
-    }, [isRendering, customBg, aspectRatio, clipData, duration, activeColor, inactiveColor, inactiveOpacity, fontFamily, smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, qt6SpectrogramSpeed, qt6ParticleDensity, qt6RingCount, qt6LedSegments, qt6SpectrogramPalette, showBackgroundLayer, mainVisualizerEnabled, lines, logoAsset, logoPosition, logoScale, logoOpacity, logoPulseEnabled, logoPulseStyle, logoPulseGap, logoPulseScale, logoPulseSensitivity, showTitle]);
+    }, [activeColor, aspectRatio, audioDuration, clipData, clampTimeline, customBg, fontFamily, inactiveColor, inactiveOpacity, isPlaying, isRendering, lines, logoAsset, logoOpacity, logoPosition, logoPulseEnabled, logoPulseGap, logoPulseScale, logoPulseSensitivity, logoPulseStyle, logoScale, mainVisualizerEnabled, mapPreviewToSongTime, postRollDuration, postRollEnabled, postRollText, postRollType, preRollCardShowTitle, preRollCardTheme, preRollCardTitleText, preRollDuration, preRollEnabled, preRollPreviewEnabled, preRollPreviewShowTitle, preRollText, preRollType, progress, qt6BarCount, qt6LedSegments, qt6ParticleDensity, qt6RingCount, qt6Sensitivity, qt6SpectrogramPalette, qt6SpectrogramSpeed, qt6Style, showBackgroundLayer, showTitle, smoothingFactor, totalPreviewDuration, verticalOffset]);
 
     useEffect(() => {
         if (selectedClipId && !isRendering) {
@@ -1133,7 +1714,14 @@ export const useVisualizer = (
                         enabled: preRollEnabled,
                         type: preRollType,
                         text: preRollText,
-                        seconds: preRollSeconds
+                        seconds: preRollSeconds,
+                        previewEnabled: preRollPreviewEnabled,
+                        previewStartSeconds: preRollPreviewStartSeconds,
+                        previewDurationSeconds: preRollPreviewDurationSeconds,
+                        previewShowTitle: preRollPreviewShowTitle,
+                        showTitle: preRollCardShowTitle,
+                        titleText: preRollCardTitleText,
+                        theme: preRollCardTheme
                     },
                     postRoll: {
                         enabled: postRollEnabled,
@@ -1172,28 +1760,33 @@ export const useVisualizer = (
         }
     };
 
+    const longLineIssues = detectLongLyricLines(lines);
+    const lrcParseResult = parseLrc(lrcDraft);
+    const longLrcGapIssues = detectLongLrcGaps(lrcDraft);
+
     return {
         state: {
             selectedClipId, manualId, aspectRatio, showBackgroundLayer, mainVisualizerEnabled, visualMode: currentVisualMode, customBg, customAudio,
             templatePreset, logoAsset, logoPosition, logoScale, logoOpacity, logoPulseEnabled, logoPulseStyle, logoPulseGap, logoPulseScale, logoPulseSensitivity, showTitle,
-            audioBitrate, videoBitrate, videoBitrateMode, fps, outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, postRollEnabled, postRollType, postRollText, postRollSeconds, imgSrc, activeColor, inactiveColor, inactiveOpacity, fontFamily,
+            audioBitrate, videoBitrate, videoBitrateMode, fps, outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, preRollPreviewEnabled, preRollPreviewStartSeconds, preRollPreviewDurationSeconds, preRollPreviewShowTitle, preRollCardShowTitle, preRollCardTitleText, preRollCardTheme, postRollEnabled, postRollType, postRollText, postRollSeconds, imgSrc, activeColor, inactiveColor, inactiveOpacity, fontFamily,
             smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, qt6SpectrogramSpeed, qt6ParticleDensity, qt6RingCount, qt6LedSegments, qt6SpectrogramPalette,
-            clipData, alignment, lines, lyricSource, applyStatus, savedPresets,
-            isRendering, renderProgress, renderError, renderSpeed, isPreparing, isGrouping, progress, duration, isPlaying
+            clipData, alignment, lines, lyricSource, lrcDraft, applyStatus, lrcApplyStatus, savedPresets,
+            longLineIssues, longLrcGapIssues, lrcInvalidLineNumbers: lrcParseResult.invalidLineNumbers, lrcParsedLineCount: lrcParseResult.entries.length,
+            isRendering, renderProgress, renderError, renderSpeed, isPreparing, isGrouping, progress, duration: totalPreviewDuration, isPlaying, hasDefaultLogo
         },
         setters: {
             setSelectedClipId, setManualId, setAspectRatio, setShowBackgroundLayer, setMainVisualizerEnabled, setCustomBg, setCustomAudio,
             setTemplatePreset, setLogoAsset, setLogoPosition, setLogoScale, setLogoOpacity, setLogoPulseEnabled, setLogoPulseStyle, setLogoPulseGap, setLogoPulseScale, setLogoPulseSensitivity, setShowTitle,
-            setAudioBitrate, setVideoBitrate, setVideoBitrateMode, setFps, setOutputAspectTarget, setPreRollEnabled, setPreRollType, setPreRollText, setPreRollSeconds, setPostRollEnabled, setPostRollType, setPostRollText, setPostRollSeconds, setImgSrc, setActiveColor, setInactiveColor, setInactiveOpacity, setFontFamily,
+            setAudioBitrate, setVideoBitrate, setVideoBitrateMode, setFps, setOutputAspectTarget, setPreRollEnabled, setPreRollType, setPreRollText, setPreRollSeconds, setPreRollPreviewEnabled, setPreRollPreviewStartSeconds, setPreRollPreviewDurationSeconds, setPreRollPreviewShowTitle, setPreRollCardShowTitle, setPreRollCardTitleText, setPreRollCardTheme, setPostRollEnabled, setPostRollType, setPostRollText, setPostRollSeconds, setImgSrc, setActiveColor, setInactiveColor, setInactiveOpacity, setFontFamily,
             setSmoothingFactor, setVerticalOffset, setQt6Style, setQt6BarCount, setQt6Sensitivity, setQt6SpectrogramSpeed, setQt6ParticleDensity, setQt6RingCount, setQt6LedSegments, setQt6SpectrogramPalette,
-            setLyricSource, setIsPlaying
+            setLyricSource, setLrcDraft, setIsPlaying
         },
         refs: {
             canvasRef, audioRef, customVideoRef
         },
         handlers: {
-            handleManualLoad, handleFileUpload, handleAudioUpload, handleLogoUpload, handleApplyLyrics, applyTemplatePreset, applyQt6LookPreset, randomizeQt6Look,
-            handleSmartGroup, handleSeek, togglePlay, startOfflineRender, handleImageError, setDuration,
+            handleManualLoad, handleFileUpload, handleAudioUpload, handleLogoUpload, handleSetLogoAsDefault, handleClearDefaultLogo, handleApplyLyrics, handleApplyLrc, handleGenerateLrcFromCurrentLines, applyTemplatePreset, applyQt6LookPreset, randomizeQt6Look,
+            handleReplaceAlignment, handleSmartGroup, handleSeek, togglePlay, startOfflineRender, handleImageError, setDuration: setAudioDuration,
             saveCurrentPreset, applySavedPreset, deleteSavedPreset
         }
     };

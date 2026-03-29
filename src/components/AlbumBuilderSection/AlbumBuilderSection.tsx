@@ -73,33 +73,38 @@ const LibraryRow: React.FC<LibraryRowProps> = ({ track, isSelected, isAlreadyInB
   return (
     <div className={cx(
       'flex items-center gap-3 p-2 rounded-lg border transition-colors',
-      isSelected ? 'border-[var(--app-accent)] bg-[var(--app-accent)]/10' : 'border-[var(--app-panel-border)]/50 hover:border-slate-500'
+      isSelected ? 'border-cyan-500/50 bg-cyan-900/20' : 'border-cyan-900/30 hover:border-cyan-700/50 bg-black/10'
     )}>
       <button
         type="button"
         onClick={() => onToggleSelected(track.id)}
         className={cx(
-          'w-5 h-5 rounded border flex items-center justify-center text-xs',
-          isSelected ? 'bg-[var(--app-accent)] border-[var(--app-accent)]' : 'border-slate-500'
+          'w-5 h-5 rounded border flex items-center justify-center text-[10px] transition-colors',
+          isSelected ? 'bg-cyan-600 border-cyan-400 text-white' : 'border-cyan-800 bg-black/40 text-transparent'
         )}
       >
         {isSelected && '✓'}
       </button>
       {track.imageUrl && (
-        <img src={track.imageUrl} alt="" className="w-10 h-10 object-cover rounded" />
+        <img src={track.imageUrl} alt="" className="w-10 h-10 object-cover rounded border border-cyan-900/50" />
       )}
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-white truncate">{track.title}</p>
-        <p className="text-xs text-slate-400 flex gap-2">
+        <p className="text-sm font-bold text-cyan-50 truncate">{track.title}</p>
+        <p className="text-[10px] font-mono text-cyan-600/80 flex gap-2 uppercase tracking-tight">
           <span>{formatDuration(track.durationMs)}</span>
-          {track.cachedLocally && <span className="text-emerald-400">cached</span>}
+          {track.cachedLocally && <span className="text-emerald-500/80">● cached</span>}
         </p>
       </div>
       {isAlreadyInBuilder ? (
-        <span className="text-xs text-slate-500 px-2 py-1">in album</span>
+        <span className="text-[10px] font-bold uppercase tracking-widest text-cyan-800 px-2 py-1">In Album</span>
       ) : (
-        <AppButton size="sm" variant="primary" onClick={() => onAddToBuilder(track.id)}>
-          +
+        <AppButton 
+          tone="console"
+          variant="console-primary"
+          size="xs"
+          onClick={() => onAddToBuilder(track.id)}
+        >
+          Add
         </AppButton>
       )}
     </div>
@@ -121,20 +126,31 @@ const BuilderRow: React.FC<BuilderRowProps> = ({ track, index, onRemove }) => {
       ref={setNodeRef}
       style={style}
       className={cx(
-        'flex items-center gap-3 p-3 rounded-lg border bg-[var(--app-panel)]/40 transition-colors',
-        isDragging ? 'opacity-50 border-[var(--app-accent)]' : 'border-[var(--app-panel-border)]/50'
+        'flex items-center gap-3 p-2 rounded-lg border transition-colors',
+        isDragging ? 'opacity-50 border-cyan-400 bg-cyan-900/40' : 'border-cyan-900/40 bg-black/20'
       )}
-      {...attributes}
-      {...listeners}
     >
-      <span className="text-xs text-slate-500 w-6 text-center">☰</span>
-      <span className="text-xs text-slate-500 w-6 text-center">{index + 1}</span>
-      {track.imageUrl && <img src={track.imageUrl} alt="" className="w-10 h-10 object-cover rounded" />}
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-white truncate">{track.title}</p>
-        <p className="text-xs text-slate-400">{formatDuration(track.durationMs)}</p>
+      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing px-1 text-cyan-800 hover:text-cyan-400 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12"></line>
+          <line x1="3" y1="6" x2="21" y2="6"></line>
+          <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
       </div>
-      <AppButton size="sm" variant="danger" onClick={() => onRemove(track.id)}>×</AppButton>
+      <span className="text-[10px] font-mono text-cyan-700 w-4 text-center">{(index + 1).toString().padStart(2, '0')}</span>
+      {track.imageUrl && <img src={track.imageUrl} alt="" className="w-8 h-8 object-cover rounded border border-cyan-900/50" />}
+      <div className="min-w-0 flex-1">
+        <p className="text-xs font-bold text-cyan-100 truncate">{track.title}</p>
+        <p className="text-[10px] font-mono text-cyan-700 uppercase">{formatDuration(track.durationMs)}</p>
+      </div>
+      <AppButton 
+        tone="console"
+        variant="console-danger"
+        size="xs"
+        onClick={() => onRemove(track.id)}
+      >
+        Remove
+      </AppButton>
     </div>
   );
 };
@@ -435,15 +451,15 @@ const AlbumBuilderSection: React.FC<AlbumBuilderSectionProps> = ({ history }) =>
   return (
     <div className="max-w-7xl mx-auto space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
       <div>
-        <h2 className="text-2xl font-bold text-white">Album Builder</h2>
-        <p className="text-sm text-slate-400 mt-1">
-          Build structured albums from local library tracks. Drag from the left pane into the right assembly zone.
+        <h2 className="text-2xl font-bold text-white uppercase tracking-tight">Album Builder</h2>
+        <p className="text-[11px] text-cyan-700/80 font-mono mt-1 uppercase tracking-wider">
+          System.Curator: Build structured albums from local library tracks. Drag from the left pane into the right assembly zone.
         </p>
       </div>
 
       {savedAlbumsState === 'error' && (
-        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-          {savedAlbumsMessage}
+        <div className="rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-mono text-red-200">
+          [ERROR] {savedAlbumsMessage}
         </div>
       )}
 
@@ -458,25 +474,26 @@ const AlbumBuilderSection: React.FC<AlbumBuilderSectionProps> = ({ history }) =>
         onDragCancel={() => setActiveDragTrackId(null)}
       >
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          <AppCard className="lg:col-span-4 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-semibold text-white">Library</h3>
-              <span className="text-xs text-slate-500">{filteredLibraryTracks.length}/{libraryTracks.length} tracks</span>
+          <AppCard tone="console" className="lg:col-span-4 p-4">
+            <div className="flex items-center justify-between mb-3 border-b border-cyan-900/40 pb-2">
+              <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Library.Tracks</h3>
+              <span className="text-[10px] font-mono text-cyan-800 tracking-tighter">{filteredLibraryTracks.length}/{libraryTracks.length} OBJECTS</span>
             </div>
             <div className="space-y-3 mb-3">
               <AppInput
+                tone="console"
                 value={libraryQuery}
                 onChange={(e) => setLibraryQuery(e.target.value)}
                 placeholder="Search title or ID"
                 aria-label="Search library tracks"
               />
               <div className="grid grid-cols-2 gap-2">
-                <AppSelect value={libraryAvailabilityFilter} onChange={(e) => setLibraryAvailabilityFilter(e.target.value as LibraryAvailabilityFilter)} aria-label="Filter by availability">
+                <AppSelect tone="console" value={libraryAvailabilityFilter} onChange={(e) => setLibraryAvailabilityFilter(e.target.value as LibraryAvailabilityFilter)} aria-label="Filter by availability">
                   <option value="all">All Sources</option>
                   <option value="cached">Cached Only</option>
                   <option value="remote">Remote Only</option>
                 </AppSelect>
-                <AppSelect value={librarySortMode} onChange={(e) => setLibrarySortMode(e.target.value as LibrarySortMode)} aria-label="Sort order">
+                <AppSelect tone="console" value={librarySortMode} onChange={(e) => setLibrarySortMode(e.target.value as LibrarySortMode)} aria-label="Sort order">
                   <option value="title-asc">Title A-Z</option>
                   <option value="title-desc">Title Z-A</option>
                   <option value="duration-asc">Duration ↑</option>
@@ -485,22 +502,22 @@ const AlbumBuilderSection: React.FC<AlbumBuilderSectionProps> = ({ history }) =>
               </div>
             </div>
             <div className="flex flex-wrap gap-2 mb-3">
-              <AppButton size="sm" variant="secondary" onClick={() => setSelectedLibraryTrackIds(filteredLibraryTracks.map(t => t.id))} disabled={filteredLibraryTracks.length === 0}>
-                Select All ({selectedFilteredCount}/{filteredLibraryTracks.length})
+              <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => setSelectedLibraryTrackIds(filteredLibraryTracks.map(t => t.id))} disabled={filteredLibraryTracks.length === 0}>
+                Select All ({selectedFilteredCount})
               </AppButton>
-              <AppButton size="sm" variant="primary" onClick={addSelectedTracksToBuilder} disabled={selectedLibraryTrackIds.length === 0}>
-                Add ({selectedLibraryTrackIds.length})
+              <AppButton tone="console" variant="console-primary" size="xs" onClick={addSelectedTracksToBuilder} disabled={selectedLibraryTrackIds.length === 0}>
+                Add Selected
               </AppButton>
-              <AppButton size="sm" variant="secondary" onClick={() => setSelectedLibraryTrackIds([])} disabled={selectedLibraryTrackIds.length === 0}>
+              <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => setSelectedLibraryTrackIds([])} disabled={selectedLibraryTrackIds.length === 0}>
                 Clear
               </AppButton>
             </div>
-            <div ref={libraryContainerRef} onScroll={(e) => setLibraryScrollTop(e.currentTarget.scrollTop)} className="h-[400px] overflow-y-auto rounded-lg border border-[var(--app-panel-border)]">
+            <div ref={libraryContainerRef} onScroll={(e) => setLibraryScrollTop(e.currentTarget.scrollTop)} className="h-[400px] overflow-y-auto rounded-lg border border-cyan-900/40 bg-black/30 custom-scrollbar">
               <div style={{ height: totalLibraryHeight, position: 'relative' }}>
                 <div style={{ transform: `translateY(${topOffset}px)` }} className="space-y-2 p-2">
                   {filteredLibraryTracks.length === 0 && (
-                    <div className="h-24 grid place-items-center text-sm text-slate-500 border-2 border-dashed border-[var(--app-panel-border)] rounded-lg">
-                      No tracks match filters
+                    <div className="h-24 grid place-items-center text-[11px] font-mono text-cyan-900 border border-dashed border-cyan-900/40 rounded">
+                      [EMPTY] NO_MATCHES_FOUND
                     </div>
                   )}
                   {visibleLibraryTracks.map((track) => (
@@ -511,34 +528,34 @@ const AlbumBuilderSection: React.FC<AlbumBuilderSectionProps> = ({ history }) =>
             </div>
           </AppCard>
 
-          <AppCard className="lg:col-span-8 p-4">
-            <div className="border border-[var(--app-panel-border)] bg-[var(--app-panel)]/50 p-3 mb-3 rounded-lg">
-              <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-                <h3 className="text-sm font-semibold text-white">Saved Albums {editingAlbumId ? `• Editing` : '• New Draft'}</h3>
-                <div className="flex flex-wrap gap-2">
-                  <AppButton size="sm" variant="secondary" onClick={() => refreshSavedAlbums(true)}>Refresh</AppButton>
-                  <AppButton size="sm" variant="warning" onClick={startNewDraftFromCurrent} disabled={!editingAlbumId}>Save As New</AppButton>
-                  <AppButton size="sm" variant="primary" onClick={() => selectedSavedAlbum && loadSavedAlbumIntoDraft(selectedSavedAlbum)} disabled={!selectedSavedAlbum}>Load</AppButton>
-                  <AppButton size="sm" variant="danger" onClick={onDeleteSelectedSavedAlbum} disabled={!selectedSavedAlbum}>{isDeleteConfirmArmed ? 'Confirm' : 'Delete'}</AppButton>
-                  <AppButton size="sm" variant="success" onClick={() => selectedSavedAlbum && exportAlbumJson(selectedSavedAlbum)} disabled={!selectedSavedAlbum}>Export</AppButton>
+          <AppCard tone="console" className="lg:col-span-8 p-4">
+            <div className="border border-cyan-900/40 bg-cyan-950/20 p-3 mb-3 rounded shadow-inner">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3 border-b border-cyan-900/40 pb-2">
+                <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Saved.Albums {editingAlbumId ? `[EDITING]` : '[NEW_DRAFT]'}</h3>
+                <div className="flex flex-wrap gap-1">
+                  <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => refreshSavedAlbums(true)}>Refresh</AppButton>
+                  <AppButton tone="console" variant="console-secondary" size="xs" onClick={startNewDraftFromCurrent} disabled={!editingAlbumId}>Save As New</AppButton>
+                  <AppButton tone="console" variant="console-primary" size="xs" onClick={() => selectedSavedAlbum && loadSavedAlbumIntoDraft(selectedSavedAlbum)} disabled={!selectedSavedAlbum}>Load</AppButton>
+                  <AppButton tone="console" variant="console-danger" size="xs" onClick={onDeleteSelectedSavedAlbum} disabled={!selectedSavedAlbum}>{isDeleteConfirmArmed ? 'Confirm' : 'Delete'}</AppButton>
+                  <AppButton tone="console" variant="console-success" size="xs" onClick={() => selectedSavedAlbum && exportAlbumJson(selectedSavedAlbum)} disabled={!selectedSavedAlbum}>Export</AppButton>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-2 mb-2">
-                <AppSelect value={selectedSavedAlbumId} onChange={(e) => { setSelectedSavedAlbumId(e.target.value); setIsDeleteConfirmArmed(false); }} aria-label="Select saved album">
+                <AppSelect tone="console" value={selectedSavedAlbumId} onChange={(e) => { setSelectedSavedAlbumId(e.target.value); setIsDeleteConfirmArmed(false); }} aria-label="Select saved album">
                   <option value="">Select saved album...</option>
-                  {savedAlbums.map((album) => <option key={album.id} value={album.id}>{album.title || 'UNTITLED'} • {album.trackIds?.length || 0} tracks</option>)}
+                  {savedAlbums.map((album) => <option key={album.id} value={album.id}>{album.title?.toUpperCase() || 'UNTITLED'} • {album.trackIds?.length || 0} TRACKS</option>)}
                 </AppSelect>
               </div>
-              <div className="min-h-5">
-                {savedAlbumsState === 'loading' && <p className="text-xs text-slate-400">Loading...</p>}
-                {isDeleteConfirmArmed && <p className="text-xs text-red-300">Delete armed. Press again to confirm.</p>}
-                {selectedSavedAlbum && <p className="text-xs text-slate-400"><span className="text-white">{selectedSavedAlbum.title}</span> • {selectedSavedAlbum.trackIds?.length || 0} tracks</p>}
+              <div className="min-h-5 flex items-center justify-between">
+                {savedAlbumsState === 'loading' && <p className="text-[10px] font-mono text-cyan-700 animate-pulse">SYSTEM_LOADING...</p>}
+                {isDeleteConfirmArmed && <p className="text-[10px] font-bold text-red-500 uppercase tracking-tight animate-bounce">! DELETE_ARMED !</p>}
+                {selectedSavedAlbum && <p className="text-[10px] font-mono text-cyan-800 uppercase tracking-tighter">Selected: <span className="text-cyan-400">{selectedSavedAlbum.title}</span> • {selectedSavedAlbum.trackIds?.length || 0} TRACKS</p>}
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
-              <AppInput value={albumTitle} onChange={(e) => setAlbumTitle(e.target.value)} placeholder="Album title" className="md:col-span-2" />
-              <AppSelect value={albumType} onChange={(e) => setAlbumType(e.target.value as AlbumType)} aria-label="Album type">
+              <AppInput tone="console" value={albumTitle} onChange={(e) => setAlbumTitle(e.target.value)} placeholder="Album title" className="md:col-span-2 font-bold" />
+              <AppSelect tone="console" value={albumType} onChange={(e) => setAlbumType(e.target.value as AlbumType)} aria-label="Album type">
                 <option value="EP">EP</option>
                 <option value="LP">LP</option>
                 <option value="GreatestHits">Greatest Hits</option>
@@ -546,16 +563,16 @@ const AlbumBuilderSection: React.FC<AlbumBuilderSectionProps> = ({ history }) =>
               </AppSelect>
             </div>
 
-            <AppTextarea value={albumDescription} onChange={(e) => setAlbumDescription(e.target.value)} placeholder="Album description" className="h-20 mb-3" />
+            <AppTextarea tone="console" value={albumDescription} onChange={(e) => setAlbumDescription(e.target.value)} placeholder="Album description" className="h-20 mb-3 text-xs" />
 
-            <div ref={builderDrop.setNodeRef} className={cx('border-2 min-h-[250px] p-3 rounded-lg mb-3', builderDrop.isOver ? 'border-[var(--app-accent)] bg-[var(--app-accent)]/10' : 'border-[var(--app-panel-border)]')}>
+            <div ref={builderDrop.setNodeRef} className={cx('border min-h-[250px] p-2 rounded mb-3 transition-colors', builderDrop.isOver ? 'border-cyan-400 bg-cyan-900/10' : 'border-cyan-900/40 bg-black/40 shadow-inner')}>
               <SortableContext items={builderTrackIds.map(id => `builder:${id}`)} strategy={verticalListSortingStrategy}>
                 {builderTracks.length === 0 && (
-                  <div className="h-[200px] grid place-items-center text-sm text-slate-500 border-2 border-dashed border-[var(--app-panel-border)] rounded-lg">
-                    Drop tracks here to build album
+                  <div className="h-[200px] grid place-items-center text-[11px] font-mono text-cyan-900 border border-dashed border-cyan-900/40 rounded">
+                    [DROP_ZONE] ASSEMBLY_AREA_EMPTY
                   </div>
                 )}
-                <div className="space-y-2">
+                <div className="space-y-1">
                   {builderTracks.map((track, index) => (
                     <BuilderRow key={track.id} track={track} index={index} onRemove={(id) => { setBuilderTrackIds(prev => prev.filter(i => i !== id)); setAriaLiveMessage('Track removed.'); }} />
                   ))}
@@ -565,31 +582,33 @@ const AlbumBuilderSection: React.FC<AlbumBuilderSectionProps> = ({ history }) =>
 
             <DragOverlay>
               {activeTrack && (
-                <div className="p-3 rounded-lg border border-[var(--app-accent)] bg-[var(--app-panel)] shadow-xl">
-                  <p className="font-semibold text-white">{activeTrack.title}</p>
+                <div className="p-2 rounded border border-cyan-400 bg-cyan-900/90 shadow-2xl backdrop-blur-md">
+                  <p className="text-xs font-bold text-white uppercase tracking-wider">{activeTrack.title}</p>
                 </div>
               )}
             </DragOverlay>
 
-            <div className="flex items-center justify-between gap-3 mb-3">
-              <p className="text-sm text-slate-400">{builderTracks.length} tracks • {formatDuration(totalBuilderDurationMs)} • {albumType}</p>
-              <div className="flex items-center gap-2">
+            <div className="flex flex-col md:flex-row items-center justify-between gap-3 mb-3 border-t border-cyan-900/40 pt-3">
+              <p className="text-[10px] font-mono text-cyan-800 uppercase tracking-tighter">
+                {builderTracks.length} TRACKS • {formatDuration(totalBuilderDurationMs)} TOTAL_TIME • TYPE: {albumType}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
                 <input ref={importAlbumInputRef} type="file" accept="application/json" onChange={onImportAlbumJsonFile} className="hidden" />
-                <AppButton size="sm" variant="danger" onClick={clearDraftAlbum} disabled={builderTrackIds.length === 0}>Clear</AppButton>
-                <AppButton size="sm" variant="secondary" onClick={() => importAlbumInputRef.current?.click()}>Import</AppButton>
-                <AppButton size="sm" variant="secondary" onClick={exportCurrentDraftJson} disabled={builderTrackIds.length === 0}>Export</AppButton>
-                <AppButton size="sm" variant="warning" onClick={onDownloadAlbumZip} disabled={builderTrackIds.length === 0 || zipState === 'packing'}>
+                <AppButton tone="console" variant="console-danger" size="xs" onClick={clearDraftAlbum} disabled={builderTrackIds.length === 0}>Clear</AppButton>
+                <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => importAlbumInputRef.current?.click()}>Import</AppButton>
+                <AppButton tone="console" variant="console-secondary" size="xs" onClick={exportCurrentDraftJson} disabled={builderTrackIds.length === 0}>Export</AppButton>
+                <AppButton tone="console" variant="console-success" size="xs" onClick={onDownloadAlbumZip} disabled={builderTrackIds.length === 0 || zipState === 'packing'}>
                   {zipState === 'packing' ? 'Packing...' : 'Download ZIP'}
                 </AppButton>
-                <AppButton size="sm" variant="primary" onClick={onSaveAlbum} disabled={!albumTitle.trim() || builderTrackIds.length === 0 || saveState === 'saving'}>
+                <AppButton tone="console" variant="console-primary" size="xs" onClick={onSaveAlbum} disabled={!albumTitle.trim() || builderTrackIds.length === 0 || saveState === 'saving'}>
                   {saveState === 'saving' ? 'Saving...' : editingAlbumId ? 'Update' : 'Save'}
                 </AppButton>
               </div>
             </div>
 
             <div className="min-h-5">
-              {saveMessage && <StatusMessage state={saveState === 'saved' ? 'done' : saveState === 'error' ? 'error' : 'idle'} message={saveMessage} />}
-              {zipMessage && <StatusMessage state={zipState === 'done' ? 'done' : zipState === 'error' ? 'error' : 'idle'} message={zipMessage} />}
+              {saveMessage && <StatusMessage tone="console" state={saveState === 'saved' ? 'done' : saveState === 'error' ? 'error' : 'idle'} message={saveMessage} />}
+              {zipMessage && <StatusMessage tone="console" state={zipState === 'done' ? 'done' : zipState === 'error' ? 'error' : 'idle'} message={zipMessage} />}
             </div>
           </AppCard>
         </div>

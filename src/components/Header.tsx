@@ -6,13 +6,17 @@ interface HeaderProps {
   onSignOut?: () => void;
   sunoCredits: number | null;
   providerConfig?: AIProviderConfig;
+  authBypassEnabled?: boolean;
+  sunoConnectionState?: 'missing' | 'checking' | 'connected' | 'lost';
 }
 
 export const Header: React.FC<HeaderProps> = ({ 
   onOpenSettings,
   onSignOut,
   sunoCredits,
-  providerConfig
+  providerConfig,
+  authBypassEnabled = false,
+  sunoConnectionState = 'missing',
 }) => {
   const buildLabel = `v${import.meta.env.VITE_APP_VERSION || 'dev'} (${import.meta.env.VITE_APP_COMMIT || 'local'})`;
   const providerLabel =
@@ -23,6 +27,39 @@ export const Header: React.FC<HeaderProps> = ({
         : providerConfig?.type === 'openapi'
           ? 'Powered by Custom API'
           : 'No provider selected';
+
+  const sunoBadge = (() => {
+    if (sunoConnectionState === 'connected') {
+      return {
+        cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
+        dot: 'bg-emerald-300',
+        text: 'Suno Connected',
+        title: 'Suno API connection is healthy',
+      };
+    }
+    if (sunoConnectionState === 'checking') {
+      return {
+        cls: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+        dot: 'bg-amber-300',
+        text: 'Suno Checking',
+        title: 'Verifying Suno API connection',
+      };
+    }
+    if (sunoConnectionState === 'lost') {
+      return {
+        cls: 'border-red-500/40 bg-red-500/10 text-red-200',
+        dot: 'bg-red-300',
+        text: 'Suno Lost',
+        title: 'Suno API connection lost. Update token/cookie in Settings.',
+      };
+    }
+    return {
+      cls: 'border-slate-500/40 bg-slate-500/10 text-slate-300',
+      dot: 'bg-slate-300',
+      text: 'Suno Missing',
+      title: 'No Suno token/cookie configured',
+    };
+  })();
 
   return (
     <header className="w-full py-4 px-4 md:px-8 flex items-center justify-between border-b border-[var(--app-panel-border)] bg-[var(--app-panel)] backdrop-blur-md sticky top-0 z-50">
@@ -48,6 +85,24 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
       
       <div className="flex items-center gap-2 sm:gap-3 relative">
+        <div
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold uppercase tracking-wide ${sunoBadge.cls}`}
+          title={sunoBadge.title}
+        >
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${sunoBadge.dot}`} />
+          {sunoBadge.text}
+        </div>
+
+        {authBypassEnabled && (
+          <div
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-[11px] font-bold uppercase tracking-wide"
+            title="Authentication is disabled for this deployment"
+          >
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-300" />
+            Auth Disabled
+          </div>
+        )}
+
         {/* Credits Display - Visible when logged in (credits not null) */}
         {sunoCredits !== null && (
             <div className="hidden sm:flex items-center gap-2 bg-[var(--app-panel)] border border-[var(--app-panel-border)]/50 px-3 py-1 rounded-lg mr-1 backdrop-blur-sm">

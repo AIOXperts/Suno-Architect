@@ -29,6 +29,16 @@ const Footer = ({ git, upstreamGit }: FooterProps) => {
             </a>
           </>
         )}
+        {' '}• Mastering engine integration based on{' '}
+        <a
+          href="https://github.com/entrepeneur4lyf/Web-Audio-Mastering"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-slate-300 hover:text-white hover:underline transition-colors font-medium"
+        >
+          entrepeneur4lyf/Web-Audio-Mastering
+        </a>
+        {' '} (ISC)
       </p>
     </footer>
   );

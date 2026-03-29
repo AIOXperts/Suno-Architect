@@ -80,6 +80,10 @@ const ActivityHistorySection: React.FC<ActivityHistorySectionProps> = ({ history
   };
 
   const handleDownloadRender = (render: OfflineRenderHistory) => {
+    if (!render.mediaBlob) {
+      alert('This render history entry stores settings only (no video file). Reopen in Visualizer and render again to download.');
+      return;
+    }
     const url = URL.createObjectURL(render.mediaBlob);
     const a = document.createElement('a');
     a.href = url;
@@ -338,18 +342,27 @@ const ActivityHistorySection: React.FC<ActivityHistorySectionProps> = ({ history
                   <div className="p-4 bg-black/40 border-b border-[var(--app-panel-border)]">
                     <h3 className="font-bold truncate" title={render.clipTitle}>{render.clipTitle}</h3>
                     <p className="text-[10px] text-slate-400 font-mono mt-1">
-                      {new Date(render.createdAt).toLocaleString()} • {(render.fileSize / 1024 / 1024).toFixed(2)} MB
+                      {new Date(render.createdAt).toLocaleString()}
+                      {typeof render.fileSize === 'number' ? ` • ${(render.fileSize / 1024 / 1024).toFixed(2)} MB` : ' • settings only'}
                     </p>
                   </div>
                   
                   {/* Basic Preview */}
                   <div className="aspect-video bg-black flex items-center justify-center border-b border-[var(--app-panel-border)] relative group">
-                     <video src={URL.createObjectURL(render.mediaBlob)} controls className="w-full h-full object-contain" />
+                     {render.mediaBlob ? (
+                       <video src={URL.createObjectURL(render.mediaBlob)} controls className="w-full h-full object-contain" />
+                     ) : (
+                       <div className="px-4 text-center">
+                         <p className="text-sm text-slate-300">No video file stored</p>
+                         <p className="text-xs text-slate-500 mt-1">This entry keeps render settings only for replay/re-render.</p>
+                       </div>
+                     )}
                   </div>
 
                   <div className="p-3 grid grid-cols-2 gap-2 mt-auto">
                     <button
                       onClick={() => handleDownloadRender(render)}
+                      disabled={!render.mediaBlob}
                       className="py-1.5 px-2 bg-emerald-900/30 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-800/50 rounded text-xs font-bold uppercase tracking-wider transition-colors"
                     >
                       Download

@@ -1,6 +1,10 @@
 # Suno Architect - Auto Generate Suno Prompts
 - Uses Gemini Flash 2.5 or 3.0 flash (which supports free keys, see [https://aistudio.google.com/api-keys](https://aistudio.google.com/api-keys))
 
+## Attribution
+- Forked from / based on [xiliourt/Suno-Architect](https://github.com/xiliourt/Suno-Architect)
+- Web mastering integration incorporates/adapts ideas and components from [entrepeneur4lyf/Web-Audio-Mastering](https://github.com/entrepeneur4lyf/Web-Audio-Mastering) (ISC licensed)
+
 ## Featues
 
 ### Generation
@@ -54,3 +58,4 @@
 
 ## Credits
 - [https://github.com/gcui-art/suno-api/](https://github.com/gcui-art/suno-api/) has reverse engineered most of the API already, so I didn't need to do it myself. Only took some tweaking, none of the code is directly use but it sure helped speeding up understanding the API. Also has interfaces and types to know what response to expect from the API - very helpful.
+- [https://github.com/entrepeneur4lyf/Web-Audio-Mastering](https://github.com/entrepeneur4lyf/Web-Audio-Mastering) for the web mastering pipeline/DSP/UI foundation integrated into the native mastering workflow (ISC).

@@ -21,3 +21,4 @@ database_id = "1e134692-cce7-410a-8cd7-8afa1556436e"
 
 [vars]
 ALLOW_REGISTRATION = "false"
+MAINTENANCE_MODE = "false"

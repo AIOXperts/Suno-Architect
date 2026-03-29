@@ -342,6 +342,205 @@ export const groupLyricsByLines = async (
 
 // --- FILE GENERATION UTILS ---
 
+export type ParsedLrcLine = {
+    lineNumber: number;
+    start_s: number;
+    text: string;
+    raw: string;
+};
+
+export type LrcParseResult = {
+    entries: ParsedLrcLine[];
+    invalidLineNumbers: number[];
+};
+
+export type LyricLineTimingIssue = {
+    lineIndex: number;
+    start_s: number;
+    end_s: number;
+    duration_s: number;
+    text: string;
+    severity: 'warning' | 'critical';
+};
+
+const parseLrcFraction = (fractionRaw: string | undefined): number => {
+    if (!fractionRaw) return 0;
+    const digits = fractionRaw.trim();
+    if (!digits) return 0;
+    if (digits.length === 1) return Number(digits) / 10;
+    if (digits.length === 2) return Number(digits) / 100;
+    return Number(digits.slice(0, 3)) / 1000;
+};
+
+export const parseLrc = (lrcContent: string): LrcParseResult => {
+    const entries: ParsedLrcLine[] = [];
+    const invalidLineNumbers: number[] = [];
+    if (!lrcContent.trim()) return { entries, invalidLineNumbers };
+
+    const lines = lrcContent.split(/\r?\n/);
+    const tsRegex = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+
+    lines.forEach((rawLine, idx) => {
+        const matches = [...rawLine.matchAll(tsRegex)];
+        const text = rawLine.replace(tsRegex, '').trim();
+        if (matches.length === 0) {
+            if (rawLine.trim()) invalidLineNumbers.push(idx + 1);
+            return;
+        }
+
+        for (const match of matches) {
+            const minutes = Number(match[1]);
+            const seconds = Number(match[2]);
+            const fraction = parseLrcFraction(match[3]);
+            if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+                invalidLineNumbers.push(idx + 1);
+                continue;
+            }
+            entries.push({
+                lineNumber: idx + 1,
+                start_s: (minutes * 60) + seconds + fraction,
+                text,
+                raw: rawLine
+            });
+        }
+    });
+
+    entries.sort((a, b) => a.start_s - b.start_s);
+    return { entries, invalidLineNumbers };
+};
+
+export const groupWordsByLrc = (aligned: AlignedWord[], lrcContent: string): AlignedWord[][] => {
+    const cleanAligned = getCleanAlignedWords(aligned);
+    const { entries } = parseLrc(lrcContent);
+    if (cleanAligned.length === 0 || entries.length === 0) return [];
+
+    const groups: AlignedWord[][] = [];
+    let wordPtr = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+        const start = entries[i].start_s;
+        const nextStart = entries[i + 1]?.start_s ?? Number.POSITIVE_INFINITY;
+
+        while (wordPtr < cleanAligned.length && cleanAligned[wordPtr].end_s <= start) {
+            wordPtr++;
+        }
+
+        const group: AlignedWord[] = [];
+        let scanPtr = wordPtr;
+        while (scanPtr < cleanAligned.length && cleanAligned[scanPtr].start_s < nextStart) {
+            group.push(cleanAligned[scanPtr]);
+            scanPtr++;
+        }
+
+        if (group.length > 0) {
+            groups.push(group);
+            wordPtr = scanPtr;
+        }
+    }
+
+    return groups;
+};
+
+export const groupWordsByLrcWithText = (aligned: AlignedWord[], lrcContent: string): AlignedWord[][] => {
+    const cleanAligned = getCleanAlignedWords(aligned);
+    const { entries } = parseLrc(lrcContent);
+    if (entries.length === 0) return [];
+    if (cleanAligned.length === 0) return [];
+
+    const baseGroups = groupWordsByLrc(cleanAligned, lrcContent);
+    const result: AlignedWord[][] = [];
+    const fallbackEnd = cleanAligned[cleanAligned.length - 1]?.end_s ?? 0;
+
+    for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const base = baseGroups[i] || [];
+        const nextStart = entries[i + 1]?.start_s;
+
+        if (!entry.text.trim()) {
+            if (base.length > 0) result.push(base);
+            continue;
+        }
+
+        const tokens = entry.text.split(/\s+/).map(t => t.trim()).filter(Boolean);
+        if (tokens.length === 0) {
+            if (base.length > 0) result.push(base);
+            continue;
+        }
+
+        const baseStart = base[0]?.start_s ?? entry.start_s;
+        const baseEnd = base[base.length - 1]?.end_s ?? nextStart ?? fallbackEnd;
+        const start_s = Math.max(0, Math.min(entry.start_s, baseStart));
+        const endCandidate = nextStart ?? baseEnd ?? (start_s + Math.max(1, tokens.length * 0.2));
+        const end_s = Math.max(start_s + 0.05, endCandidate);
+        const slice = Math.max(0.03, (end_s - start_s) / tokens.length);
+
+        const syntheticLine: AlignedWord[] = tokens.map((token, idx) => {
+            const tokenStart = start_s + (slice * idx);
+            const tokenEnd = idx === tokens.length - 1 ? end_s : (start_s + (slice * (idx + 1)));
+            return {
+                word: token,
+                start_s: tokenStart,
+                end_s: Math.max(tokenStart + 0.02, tokenEnd),
+                success: true,
+                p_align: 1
+            };
+        });
+
+        result.push(syntheticLine);
+    }
+
+    return result;
+};
+
+export const detectLongLyricLines = (
+    lines: AlignedWord[][],
+    warningThresholdSec = 12,
+    criticalThresholdSec = 30
+): LyricLineTimingIssue[] => {
+    const issues: LyricLineTimingIssue[] = [];
+
+    lines.forEach((line, idx) => {
+        if (!line.length) return;
+        const start_s = line[0].start_s;
+        const end_s = line[line.length - 1].end_s;
+        const duration_s = Math.max(0, end_s - start_s);
+        if (duration_s < warningThresholdSec) return;
+
+        issues.push({
+            lineIndex: idx,
+            start_s,
+            end_s,
+            duration_s,
+            text: line.map(w => w.word).join(' ').trim(),
+            severity: duration_s >= criticalThresholdSec ? 'critical' : 'warning'
+        });
+    });
+
+    return issues.sort((a, b) => b.duration_s - a.duration_s);
+};
+
+export const detectLongLrcGaps = (
+    lrcContent: string,
+    warningThresholdSec = 12,
+    criticalThresholdSec = 30
+): Array<{ fromLineNumber: number; toLineNumber: number; gap_s: number; severity: 'warning' | 'critical' }> => {
+    const { entries } = parseLrc(lrcContent);
+    const issues: Array<{ fromLineNumber: number; toLineNumber: number; gap_s: number; severity: 'warning' | 'critical' }> = [];
+
+    for (let i = 0; i < entries.length - 1; i++) {
+        const gap_s = entries[i + 1].start_s - entries[i].start_s;
+        if (gap_s < warningThresholdSec) continue;
+        issues.push({
+            fromLineNumber: entries[i].lineNumber,
+            toLineNumber: entries[i + 1].lineNumber,
+            gap_s,
+            severity: gap_s >= criticalThresholdSec ? 'critical' : 'warning'
+        });
+    }
+
+    return issues.sort((a, b) => b.gap_s - a.gap_s);
+};
+
 export const formatLrcTimestamp = (seconds: number) => {
     const date = new Date(0);
     date.setMilliseconds(seconds * 1000);

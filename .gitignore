@@ -35,8 +35,17 @@ dist-ssr
 .turbo/
 .cache/
 
+# local dev assets & notes
+input/
+Issues/
+plans/
+suno-architect*
+
 # local secret/key material
 *.pem
 *.key
 *.p12
 *.pfx
+private/
+test-results/
+playwright-report/
