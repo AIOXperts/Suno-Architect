@@ -16,6 +16,7 @@ import ActionButtons from './subcomponents/ActionButtons';
 import CanvasPreview from './subcomponents/CanvasPreview';
 import PlaybackControls from './subcomponents/PlaybackControls';
 import ColorEventsManager from './subcomponents/ColorEventsManager';
+import WordAlignmentEditorCard from './subcomponents/WordAlignmentEditorCard';
 
 interface VisualizerSectionProps {
   history: SunoClip[];

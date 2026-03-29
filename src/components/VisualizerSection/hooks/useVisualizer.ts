@@ -1772,7 +1772,8 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
             smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, qt6SpectrogramSpeed, qt6ParticleDensity, qt6RingCount, qt6LedSegments, qt6SpectrogramPalette,
             clipData, alignment, lines, lyricSource, lrcDraft, applyStatus, lrcApplyStatus, savedPresets,
             longLineIssues, longLrcGapIssues, lrcInvalidLineNumbers: lrcParseResult.invalidLineNumbers, lrcParsedLineCount: lrcParseResult.entries.length,
-            isRendering, renderProgress, renderError, renderSpeed, isPreparing, isGrouping, progress, duration: totalPreviewDuration, isPlaying, hasDefaultLogo
+            isRendering, renderProgress, renderError, renderSpeed, isPreparing, isGrouping, progress, duration: totalPreviewDuration, isPlaying, hasDefaultLogo,
+            colorEvents
         },
         setters: {
             setSelectedClipId, setManualId, setAspectRatio, setShowBackgroundLayer, setMainVisualizerEnabled, setCustomBg, setCustomAudio,
@@ -1787,7 +1788,8 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
         handlers: {
             handleManualLoad, handleFileUpload, handleAudioUpload, handleLogoUpload, handleSetLogoAsDefault, handleClearDefaultLogo, handleApplyLyrics, handleApplyLrc, handleGenerateLrcFromCurrentLines, applyTemplatePreset, applyQt6LookPreset, randomizeQt6Look,
             handleReplaceAlignment, handleSmartGroup, handleSeek, togglePlay, startOfflineRender, handleImageError, setDuration: setAudioDuration,
-            saveCurrentPreset, applySavedPreset, deleteSavedPreset
+            saveCurrentPreset, applySavedPreset, deleteSavedPreset,
+            addColorEvent, removeColorEvent, updateColorEvent
         }
     };
 };
