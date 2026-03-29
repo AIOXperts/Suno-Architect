@@ -154,6 +154,10 @@ const WebAudioMasterNativePreview: React.FC<Props> = ({ sourceBlob, sourceFileNa
   useEffect(() => { activeBufferRef.current = activeBuffer; }, [activeBuffer]);
   useEffect(() => { originalBufferRef.current = originalBuffer; }, [originalBuffer]);
   useEffect(() => { processedBufferRef.current = processedBuffer; }, [processedBuffer]);
+  const decodedBufferRef = useRef<AudioBuffer | null>(null);
+  const prevSourceBlobRef = useRef<Blob | null>(null);
+  const lastSourceBlobRef = useRef<Blob | null>(null);
+
   useEffect(() => { peakHoldLRef.current = peakHoldL; }, [peakHoldL]);
   useEffect(() => { peakHoldRRef.current = peakHoldR; }, [peakHoldR]);
   useEffect(() => { truePeakHoldDbRef.current = truePeakHoldDb; }, [truePeakHoldDb]);
@@ -182,6 +186,7 @@ const WebAudioMasterNativePreview: React.FC<Props> = ({ sourceBlob, sourceFileNa
       setCurrentTime(0);
       setRenderedLufs(null);
       setRenderProgress(null);
+      decodedBufferRef.current = null;
       return;
     }
 
@@ -190,11 +195,31 @@ const WebAudioMasterNativePreview: React.FC<Props> = ({ sourceBlob, sourceFileNa
     setStatusMessage('Rendering native preview...');
     setRenderProgress(0.02);
 
+    const sourceChanged = sourceBlob !== prevSourceBlobRef.current;
+    if (sourceChanged) {
+      decodedBufferRef.current = null;
+    }
+    prevSourceBlobRef.current = sourceBlob;
+
+    const cachedDecoded = sourceChanged ? undefined : decodedBufferRef.current;
+    const needsDecode = sourceChanged || !decodedBufferRef.current;
+
+    if (needsDecode) {
+      setStatusMessage('Decoding source for preview...');
+      setRenderProgress(0.1);
+    } else {
+      setStatusMessage('Rendering preview DSP...');
+      setRenderProgress(0.5);
+    }
+
     void renderNativePreviewBufferFromBlob(sourceBlob, settings, (update) => {
       if (renderSeqRef.current !== seq) return;
-      setStatusMessage(update.message);
-      setRenderProgress(Math.max(0, Math.min(1, update.progress)));
-    }).then((result) => {
+      if (needsDecode) {
+        setRenderProgress(Math.max(0.1, Math.min(0.5, update.progress)));
+      } else {
+        setRenderProgress(Math.max(0.5, Math.min(1, update.progress)));
+      }
+    }, cachedDecoded).then((result) => {
       if (renderSeqRef.current !== seq) return;
       setOriginalBuffer(result.originalBuffer);
       setProcessedBuffer(result.previewBuffer);
@@ -205,6 +230,9 @@ const WebAudioMasterNativePreview: React.FC<Props> = ({ sourceBlob, sourceFileNa
       setRenderedLufs(typeof result.measuredLufs === 'number' ? result.measuredLufs : null);
       setRmsDbOriginal(getRmsDbFromBuffer(result.originalBuffer));
       setRmsDbProcessed(getRmsDbFromBuffer(result.previewBuffer));
+      if (result.decodedBuffer) {
+        decodedBufferRef.current = result.decodedBuffer;
+      }
       setStatus('ready');
       setStatusMessage('Native preview ready.');
       setRenderProgress(1);

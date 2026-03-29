@@ -26,6 +26,7 @@ export interface NativePreviewRenderResult {
   originalBuffer: AudioBuffer;
   previewBuffer: AudioBuffer;
   measuredLufs?: number;
+  decodedBuffer?: AudioBuffer;
 }
 
 export function createDefaultMasteringSettings(): MasteringSettings {
@@ -117,10 +118,16 @@ export async function renderNativeMasteredWavFromBlob(
 export async function renderNativePreviewBufferFromBlob(
   inputBlob: Blob,
   settings: MasteringSettings,
-  onProgress?: (update: NativeMasteringProgress) => void
+  onProgress?: (update: NativeMasteringProgress) => void,
+  cachedDecoded?: AudioBuffer
 ): Promise<NativePreviewRenderResult> {
-  onProgress?.({ phase: 'decode', progress: 0.1, message: 'Decoding source for preview...' });
-  const decoded = await decodeAudioBlobToBuffer(inputBlob);
+  let decoded: AudioBuffer;
+  if (cachedDecoded) {
+    decoded = cachedDecoded;
+  } else {
+    onProgress?.({ phase: 'decode', progress: 0.1, message: 'Decoding source for preview...' });
+    decoded = await decodeAudioBlobToBuffer(inputBlob);
+  }
   const originalBuffer = cloneAudioBuffer(decoded);
   const processingInput = cloneAudioBuffer(decoded);
   
@@ -132,6 +139,7 @@ export async function renderNativePreviewBufferFromBlob(
     originalBuffer, 
     previewBuffer,
     measuredLufs: result.measuredLufs,
+    decodedBuffer: decoded,
   };
 }
 
