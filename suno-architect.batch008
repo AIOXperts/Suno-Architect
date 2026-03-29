@@ -1,0 +1,3166 @@
+
+
+export async function reorderAlbumSongs(albumId: number, songIds: string[]): Promise<void> {
+  await request(`/api/library/albums/${albumId}/songs/reorder`, {
+    method: 'PATCH',
+    body: JSON.stringify({ songIds }),
+  });
+}
+
+export async function getSongMeta(songId: string): Promise<SongMetaResponse> {
+  return request<SongMetaResponse>(`/api/library/songs/${encodeURIComponent(songId)}/meta`, { method: 'GET' });
+}
+
+export async function setSongTags(songId: string, tags: string[]): Promise<void> {
+  await request(`/api/library/songs/${encodeURIComponent(songId)}/meta`, {
+    method: 'PUT',
+    body: JSON.stringify({ tags }),
+  });
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/sunoApi.ts ---
+
+import { ParsedSunoOutput, LyricAlignmentResponse } from "../types";
+import { listAllTracks, listTracksByUpdatedAtDesc } from './offlineDb';
+
+export const extractSunoPlaylistId = (input: string): string | null => {
+    const trimmed = (input || "").trim();
+    if (!trimmed) return null;
+
+const direct = trimmed.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    if (direct) return direct[0];
+
+const url = trimmed.match(/suno\.com\/playlist\/([0-9a-f-]{36})/i);
+    if (url?.[1]) return url[1];
+
+const prefixed = trimmed.match(/^playlist:([0-9a-f-]{36})$/i);
+    if (prefixed?.[1]) return prefixed[1];
+
+return null;
+};
+
+const normalizeSunoAuth = (raw: string): { bearerToken?: string; cookie?: string } => {
+    const trimmed = (raw || "").trim();
+    if (!trimmed) return {};
+
+// Support users pasting "Bearer <token>" directly.
+    const bearerMatch = trimmed.match(/^Bearer\s+(.+)$/i);
+    if (bearerMatch?.[1]) {
+        return { bearerToken: bearerMatch[1].trim() };
+    }
+
+// Cookie-like payloads usually contain key=value pairs.
+    const looksLikeCookie = /[=;]/.test(trimmed) || trimmed.includes("__session=");
+    if (looksLikeCookie) {
+        return { cookie: trimmed };
+    }
+
+// JWTs typically start with "ey", but fallback to treating any opaque token as bearer.
+    return { bearerToken: trimmed };
+};
+
+export const getSunoPlaylist = async (playlistIdOrUrl: string, cookie?: string): Promise<any> => {
+    const playlistId = extractSunoPlaylistId(playlistIdOrUrl);
+    if (!playlistId) throw new Error("Invalid playlist ID or URL");
+
+const ENDPOINT = `https://studio-api.prod.suno.com/api/playlist/${playlistId}`;
+    const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+    };
+
+if (cookie) {
+        const auth = normalizeSunoAuth(cookie);
+        if (auth.bearerToken) {
+            headers["Authorization"] = `Bearer ${auth.bearerToken}`;
+        } else if (auth.cookie) {
+            headers["Cookie"] = auth.cookie;
+        }
+    }
+
+const response = await fetch(ENDPOINT, { method: "GET", headers });
+    if (!response.ok) {
+        throw new Error(`Failed to fetch playlist. Status: ${response.status}`);
+    }
+    return response.json();
+};
+
+export const getSunoCredits = async (cookie: string): Promise<number> => {
+    if (!cookie) throw new Error("No cookie provided");
+    
+    // Direct Suno billing endpoint
+    const BILLING_ENDPOINT = "https://studio-api.prod.suno.com/api/billing/info/";
+    
+    try {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+const auth = normalizeSunoAuth(cookie);
+        if (auth.bearerToken) {
+            headers["Authorization"] = `Bearer ${auth.bearerToken}`;
+        } else if (auth.cookie) {
+            headers["Cookie"] = auth.cookie;
+        } else {
+            throw new Error("Invalid Suno token/cookie format");
+        }
+
+const response = await fetch(BILLING_ENDPOINT, {
+            method: "GET",
+            headers: headers
+        });
+
+if (!response.ok) {
+            throw new Error(`Failed to fetch credits. Status: ${response.status}`);
+        }
+
+const data = await response.json();
+        // Return total_credits_left or fallback to 0
+        return typeof data.total_credits_left === 'number' ? data.total_credits_left : 0;
+    } catch (error) {
+        console.error("Failed to get credits:", error);
+        throw error;
+    }
+};
+
+export const getSunoFeed = async (
+    cookie: string, 
+    limit: number = 20, 
+    cursor: string | null = null, 
+    searchText?: string
+): Promise<any> => {
+    if (!cookie) throw new Error("No cookie provided");
+
+const FEED_ENDPOINT = `https://studio-api.prod.suno.com/api/feed/v3`;
+
+try {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+const auth = normalizeSunoAuth(cookie);
+        if (auth.bearerToken) {
+            headers["Authorization"] = `Bearer ${auth.bearerToken}`;
+        } else if (auth.cookie) {
+            headers["Cookie"] = auth.cookie;
+        } else {
+            throw new Error("Invalid Suno token/cookie format");
+        }
+
+const body: any = {
+            "cursor": cursor,
+            "limit": limit,
+            "filters": {
+                "disliked": "False",
+                "fullSong": "True",
+                "trashed": "False",
+                "fromStudioProject": { "presence": "False" },
+                "stem": { "presence": "False" }
+            }
+        };
+
+if (searchText && searchText.trim()) {
+            body.filters.searchText = searchText.trim();
+        }
+
+const response = await fetch(FEED_ENDPOINT, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(body),
+        });
+
+if (response.status === 429) {
+            throw new Error("429");
+        }
+
+if (!response.ok) {
+            throw new Error(`Failed to fetch feed. Status: ${response.status}`);
+        }
+
+return await response.json();
+    } catch (error) {
+        // console.error("Failed to get suno feed:", error);
+        throw error;
+    }
+};
+
+const extractFeedClips = (feed: any): any[] => (Array.isArray(feed?.clips) ? feed.clips : []);
+
+const extractNextFeedCursor = (feed: any): string | null => {
+    const candidate =
+        feed?.next_cursor ??
+        feed?.nextCursor ??
+        feed?.cursor ??
+        feed?.pagination?.next_cursor ??
+        feed?.pagination?.nextCursor ??
+        null;
+    return typeof candidate === 'string' && candidate.trim() ? candidate : null;
+};
+
+export const getSunoFeedAll = async (
+    cookie: string,
+    pageSize: number = 100,
+    searchText?: string,
+    options?: { maxPages?: number; maxClips?: number }
+): Promise<any> => {
+    const maxPages = Math.max(1, options?.maxPages ?? 30);
+    const maxClips = Math.max(1, options?.maxClips ?? 5000);
+    const safePageSize = Math.max(1, Math.min(pageSize, 200));
+
+const allClips: any[] = [];
+    let cursor: string | null = null;
+    let page = 0;
+    const seenCursors = new Set<string>();
+
+while (page < maxPages && allClips.length < maxClips) {
+        const feed = await getSunoFeed(cookie, safePageSize, cursor, searchText);
+        const clips = extractFeedClips(feed);
+        allClips.push(...clips);
+        page += 1;
+
+const nextCursor = extractNextFeedCursor(feed);
+        if (!nextCursor || nextCursor === cursor || seenCursors.has(nextCursor) || clips.length === 0) {
+            break;
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+    }
+
+return { clips: allClips };
+};
+
+export const getSunoFeedOfflineAware = async (
+    cookie: string,
+    limit: number | 'all' = 20,
+    cursor: string | null = null,
+    searchText?: string,
+    options?: { useCachedData?: boolean }
+): Promise<any> => {
+    const useCachedData = !!options?.useCachedData;
+    if (!useCachedData) {
+        if (limit === 'all') {
+            return getSunoFeedAll(cookie, 100, searchText);
+        }
+        return getSunoFeed(cookie, limit, cursor, searchText);
+    }
+
+const tracks = limit === 'all' ? await listAllTracks() : await listTracksByUpdatedAtDesc(limit);
+    const filtered = searchText?.trim()
+        ? tracks.filter((t) => {
+            const q = searchText.toLowerCase();
+            return t.title.toLowerCase().includes(q) || t.metadata.prompt.toLowerCase().includes(q);
+        })
+        : tracks;
+
+return {
+        clips: filtered.map((t) => ({
+            id: t.id,
+            title: t.title,
+            created_at: new Date(t.createdAt).toISOString(),
+            model_name: t.raw?.model_name || 'offline',
+            image_url: t.imageUrl,
+            image_large_url: t.imageUrl,
+            metadata: {
+                ...(t.raw?.metadata || {}),
+                prompt: t.metadata.prompt,
+                tags: t.metadata.tags.join(', '),
+                duration: t.metadata.durationMs / 1000,
+            },
+            audio_url: t.audioUrl,
+        })),
+    };
+};
+
+export const getLyricAlignment = async (songId: string, cookie: string): Promise<LyricAlignmentResponse> => {
+    if (!cookie) throw new Error("No cookie provided");
+
+const ENDPOINT = `https://studio-api.prod.suno.com/api/gen/${songId}/aligned_lyrics/v2`;
+
+try {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+const auth = normalizeSunoAuth(cookie);
+        if (auth.bearerToken) {
+            headers["Authorization"] = `Bearer ${auth.bearerToken}`;
+        } else if (auth.cookie) {
+            headers["Cookie"] = auth.cookie;
+        } else {
+            throw new Error("Invalid Suno token/cookie format");
+        }
+
+const response = await fetch(ENDPOINT, {
+            method: "GET",
+            headers: headers
+        });
+
+if (!response.ok) {
+            throw new Error(`Failed to fetch alignment. Status: ${response.status}`);
+        }
+
+const data = await response.json();
+        return data; // Expected to match LyricAlignmentResponse structure
+    } catch (error) {
+        console.error("Failed to get lyric alignment:", error);
+        throw error;
+    }
+};
+
+export const getSunoClip = async (clipId: string, cookie: string): Promise<any> => {
+    if (!cookie) throw new Error("No cookie provided");
+
+const ENDPOINT = `https://studio-api.prod.suno.com/api/clip/${clipId}`;
+
+try {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+const auth = normalizeSunoAuth(cookie);
+        if (auth.bearerToken) {
+            headers["Authorization"] = `Bearer ${auth.bearerToken}`;
+        } else if (auth.cookie) {
+            headers["Cookie"] = auth.cookie;
+        } else {
+            throw new Error("Invalid Suno token/cookie format");
+        }
+
+const response = await fetch(ENDPOINT, {
+            method: "GET",
+            headers: headers
+        });
+
+if (!response.ok) {
+            throw new Error(`Failed to fetch clip. Status: ${response.status}`);
+        }
+
+return await response.json();
+    } catch (error) {
+        console.error("Failed to get suno clip:", error);
+        throw error;
+    }
+};
+
+export const triggerSunoGeneration = async (
+  data: ParsedSunoOutput, 
+  cookie: string,
+  model: string = "chirp-bluejay"
+): Promise<any> => {
+  if (!cookie) {
+    throw new Error("Suno Cookie/Token is missing.");
+  }
+
+// Use the proxy endpoint to avoid CORS issues and manage headers
+  const API_ENDPOINT = import.meta.env.VITE_SUNO_PROXY_URL || "/api/suno-proxy";
+  
+  // Normalize 0-100 to 0.0-1.0
+  const weirdness = typeof data.weirdness === 'number' ? data.weirdness / 100 : 0.5;
+  const styleWeight = typeof data.styleInfluence === 'number' ? data.styleInfluence / 100 : 0.5;
+
+// Construct payload for Custom Mode
+  const payload = {
+    prompt: data.lyricsWithTags || "",
+    tags: data.style || "",
+    negative_tags: data.excludeStyles || "",
+    title: data.title || "Suno Architect Generation",
+    make_instrumental: !data.lyricsWithTags && !!data.style,
+    mv: model, // Dynamic Model selection
+    continue_clip_id: null,
+    continue_at: null,
+    generation_type: "TEXT",
+    metadata: {
+        create_mode: "custom",
+        control_sliders: {
+            weirdness_constraint: weirdness,
+            style_weight: styleWeight
+        },
+        can_control_sliders: [
+            "weirdness_constraint",
+            "style_weight"
+        ]
+    }
+  };
+
+try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+
+// Handle Authentication
+    const auth = normalizeSunoAuth(cookie);
+    if (auth.bearerToken) {
+        headers["Authorization"] = `Bearer ${auth.bearerToken}`;
+    } else if (auth.cookie) {
+        // The proxy converts X-Suno-Cookie to Cookie header server-side.
+        headers["X-Suno-Cookie"] = auth.cookie;
+    } else {
+        throw new Error("Invalid Suno token/cookie format");
+    }
+
+const response = await fetch(API_ENDPOINT, {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify(payload),
+    });
+
+if (!response.ok) {
+      const errorText = await response.text();
+      let errorMessage = `Status ${response.status}`;
+      
+      try {
+          const jsonErr = JSON.parse(errorText);
+          if (jsonErr.detail) errorMessage = jsonErr.detail;
+          if (jsonErr.message) errorMessage = jsonErr.message;
+          if (jsonErr.error) errorMessage = jsonErr.error;
+      } catch (e) {
+          // Fallback if not JSON
+          const cleanText = errorText.replace(/<[^>]*>?/gm, '').substring(0, 200);
+          if (cleanText) errorMessage = cleanText;
+      }
+      throw new Error(`Suno API Failed: ${errorMessage}`);
+    }
+
+return await response.json();
+  } catch (error: any) {
+    console.error("Suno Proxy API Error:", error);
+    throw error;
+  }
+};
+
+export const updateSunoMetadata = async (clipId: string, data: ParsedSunoOutput, cookie: string): Promise<any> => {
+    if (!cookie) throw new Error("No cookie provided");
+
+// Point to the metadata proxy
+    const PROXY_ENDPOINT = `https://studio-api.prod.suno.com/api/gen/${clipId}/set_metadata/`;
+    
+    // Construct payload
+    const payload = {
+      "title": data.title || "Untitled",
+      "lyrics": data.lyricsAlone || "", // Use clean lyrics
+      "caption": "",
+      "caption_mentions": {
+        "user_mentions": []
+      },
+      "remove_image_cover": false,
+      "remove_video_cover": false
+    };
+
+try {
+        const headers: Record<string, string> = {
+            "Content-Type": "application/json",
+        };
+
+const auth = normalizeSunoAuth(cookie);
+        if (auth.bearerToken) {
+             headers["Authorization"] = `Bearer ${auth.bearerToken}`;
+        } else if (auth.cookie) {
+             headers["X-Suno-Cookie"] = auth.cookie;
+        } else {
+             throw new Error("Invalid Suno token/cookie format");
+        }
+
+const response = await fetch(PROXY_ENDPOINT, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(payload)
+        });
+
+if (!response.ok) {
+             const errorText = await response.text();
+             console.warn("Metadata update failed for " + clipId, errorText);
+             return null;
+        }
+        
+        return await response.json();
+    } catch (e) {
+        console.error("Failed to update metadata", e);
+        return null; 
+    }
+};
+
+export interface WavConversionTask {
+    taskId: string;
+    musicId: string;
+    musicIndex: number;
+    status: 'PENDING' | 'SUCCESS' | 'CREATE_TASK_FAILED' | 'GENERATE_WAV_FAILED' | 'CALLBACK_EXCEPTION';
+    audioWavUrl?: string;
+    errorMessage?: string;
+    createTime?: string;
+    completeTime?: string;
+}
+
+const normalizeWavStatus = (value: unknown, audioWavUrl?: string): WavConversionTask['status'] => {
+    if (value === true && audioWavUrl) return 'SUCCESS';
+    if (typeof value === 'string') {
+        const upper = value.toUpperCase();
+        if (upper === 'SUCCESS' || upper === 'PENDING' || upper === 'CREATE_TASK_FAILED' || upper === 'GENERATE_WAV_FAILED' || upper === 'CALLBACK_EXCEPTION') {
+            return upper as WavConversionTask['status'];
+        }
+    }
+    return audioWavUrl ? 'SUCCESS' : 'PENDING';
+};
+
+export const convertToWav = async (musicId: string, musicIndex: number = 0, apiKey: string): Promise<{ taskId: string }> => {
+    if (!apiKey) throw new Error("No API key provided");
+    if (!musicId) throw new Error("No music ID provided");
+
+const ENDPOINT = "https://api.sunoapi.org/api/v1/wav/create";
+
+const response = await fetch(ENDPOINT, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+            musicId,
+            musicIndex,
+        }),
+    });
+
+if (!response.ok) {
+        const error = await response.json().catch(() => ({ msg: "Failed to create WAV conversion" }));
+        throw new Error(error.msg || `Failed to create WAV conversion. Status: ${response.status}`);
+    }
+
+const data = await response.json();
+    const taskId = data?.data?.taskId || data?.taskId || data?.data?.id || data?.id;
+    if (!taskId || typeof taskId !== 'string') {
+        throw new Error("WAV conversion task was created but no taskId was returned");
+    }
+    return { taskId };
+};
+
+export const getWavConversionStatus = async (taskId: string, apiKey: string): Promise<WavConversionTask> => {
+    if (!apiKey) throw new Error("No API key provided");
+    if (!taskId) throw new Error("No task ID provided");
+
+const ENDPOINT = `https://api.sunoapi.org/api/v1/wav/record-info?taskId=${encodeURIComponent(taskId)}`;
+
+const response = await fetch(ENDPOINT, {
+        method: "GET",
+        headers: {
+            "Authorization": `Bearer ${apiKey}`,
+        },
+    });
+
+if (!response.ok) {
+        throw new Error(`Failed to get WAV conversion status. Status: ${response.status}`);
+    }
+
+const data = await response.json();
+    const payload = data?.data || data || {};
+    const responsePayload = payload?.response || {};
+    const audioWavUrl = responsePayload?.audioWavUrl || payload?.audioWavUrl;
+    const status = normalizeWavStatus(
+        payload?.successFlag ?? payload?.status ?? payload?.state ?? data?.status,
+        audioWavUrl
+    );
+    return {
+        taskId: payload?.taskId || taskId,
+        musicId: payload?.musicId || "",
+        musicIndex: payload?.musicIndex || 0,
+        status,
+        audioWavUrl,
+        errorMessage: payload?.errorMessage || payload?.message || data?.msg,
+        createTime: payload?.createTime,
+        completeTime: payload?.completeTime,
+    };
+};
+
+export const waitForWavConversion = async (taskId: string, apiKey: string, maxAttempts: number = 60, intervalMs: number = 5000): Promise<WavConversionTask> => {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const result = await getWavConversionStatus(taskId, apiKey);
+        
+        if (result.status === 'SUCCESS') {
+            return result;
+        }
+        
+        if (result.status === 'CREATE_TASK_FAILED' || result.status === 'GENERATE_WAV_FAILED' || result.status === 'CALLBACK_EXCEPTION') {
+            throw new Error(result.errorMessage || `WAV conversion failed: ${result.status}`);
+        }
+        
+        // Still PENDING, wait and retry
+        await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+    
+    throw new Error("WAV conversion timed out");
+};
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/providers/geminiProvider.ts ---
+import { GoogleGenAI } from "@google/genai";
+import { AIProvider, GenerateContentRequest, GenerateContentResponse, AIProviderConfig } from "../../types";
+
+export class GeminiProvider implements AIProvider {
+  private client: GoogleGenAI;
+  private config: AIProviderConfig;
+
+constructor(config: AIProviderConfig) {
+    if (!config.apiKey) {
+      throw new Error("Gemini API Key is required");
+    }
+    this.config = config;
+    this.client = new GoogleGenAI({ apiKey: config.apiKey });
+  }
+
+async generateContent(request: GenerateContentRequest): Promise<GenerateContentResponse> {
+    const response = await this.client.models.generateContent({
+      model: request.model,
+      contents: request.contents,
+      config: {
+        systemInstruction: request.systemInstruction,
+        temperature: request.temperature ?? 0.8,
+        responseMimeType: request.responseMimeType,
+      },
+    });
+
+return {
+      text: response.text || "",
+    };
+  }
+
+validateConfig(): boolean {
+    return !!this.config.apiKey;
+  }
+
+async getAvailableModels(): Promise<string[]> {
+    return [
+      'gemini-3-flash-preview',
+      'gemini-2.5-flash',
+      'gemini-1.5-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro-latest',
+    ];
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/providers/openApiProvider.ts ---
+import { AIProvider, GenerateContentRequest, GenerateContentResponse, AIProviderConfig } from "../../types";
+
+export class OpenAPIProvider implements AIProvider {
+  private config: AIProviderConfig;
+
+constructor(config: AIProviderConfig) {
+    if (!config.baseUrl) {
+      throw new Error("OpenAPI baseUrl is required");
+    }
+    this.config = {
+      ...config,
+      baseUrl: config.baseUrl.replace(/\/+$/, ''),
+    };
+  }
+
+async generateContent(request: GenerateContentRequest): Promise<GenerateContentResponse> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      ...this.config.headers,
+    };
+
+if (this.config.apiKey && this.config.authHeader) {
+      const authValue = this.config.authPrefix 
+        ? `${this.config.authPrefix}${this.config.apiKey}`
+        : this.config.apiKey;
+      headers[this.config.authHeader] = authValue;
+    }
+
+const userContent = typeof request.contents === "string"
+      ? request.contents
+      : JSON.stringify(request.contents);
+
+const messages = [];
+    if (request.systemInstruction) {
+      messages.push({
+        role: "system",
+        content: request.systemInstruction,
+      });
+    }
+    messages.push({
+      role: "user",
+      content: userContent,
+    });
+
+const body: any = {
+      model: request.model,
+      messages,
+      temperature: request.temperature ?? 0.8,
+    };
+
+if (request.responseMimeType === "application/json") {
+      body.response_format = { type: "json_object" };
+    }
+
+const controller = new AbortController();
+    const timeoutMs = request.timeoutMs ?? 60000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    }).finally(() => {
+      clearTimeout(timeoutId);
+    });
+
+if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
+      throw new Error(error.error?.message || `OpenAPI error: ${response.statusText}`);
+    }
+
+const data = await response.json();
+    return {
+      text: data.choices?.[0]?.message?.content || "",
+    };
+  }
+
+validateConfig(): boolean {
+    return !!this.config.baseUrl;
+  }
+
+async getAvailableModels(): Promise<string[]> {
+    if (!this.config.baseUrl) {
+      return [];
+    }
+
+try {
+      const headers: Record<string, string> = {
+        "Accept": "application/json",
+        ...this.config.headers,
+      };
+
+if (this.config.apiKey && this.config.authHeader) {
+        const authValue = this.config.authPrefix 
+          ? `${this.config.authPrefix}${this.config.apiKey}`
+          : this.config.apiKey;
+        headers[this.config.authHeader] = authValue;
+      }
+
+const response = await fetch(`${this.config.baseUrl}/models?include_metadata=true`, {
+        method: "GET",
+        headers,
+      });
+
+if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data)) {
+          return data.map((m: any) => m.id || m.model || m.name).filter(Boolean);
+        } else if (data.data && Array.isArray(data.data)) {
+          return data.data.map((m: any) => m.id || m.model || m.name).filter(Boolean);
+        } else if (data.models && Array.isArray(data.models)) {
+          return data.models.map((m: any) => m.id || m.model || m.name).filter(Boolean);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to fetch OpenAPI models", e);
+    }
+
+return [];
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/providers/openRouterProvider.ts ---
+import { AIProvider, GenerateContentRequest, GenerateContentResponse, AIProviderConfig } from "../../types";
+
+export class OpenRouterProvider implements AIProvider {
+  private config: AIProviderConfig;
+  private baseUrl = "https://openrouter.ai/api/v1";
+
+constructor(config: AIProviderConfig) {
+    if (!config.apiKey) {
+      throw new Error("OpenRouter API Key is required");
+    }
+    this.config = config;
+    if (config.baseUrl) {
+      this.baseUrl = config.baseUrl;
+    }
+  }
+
+async generateContent(request: GenerateContentRequest): Promise<GenerateContentResponse> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${this.config.apiKey}`,
+      ...this.config.headers,
+    };
+
+if (!headers["HTTP-Referer"]) {
+      headers["HTTP-Referer"] = window.location.origin;
+    }
+    if (!headers["X-Title"]) {
+      headers["X-Title"] = "Suno Architect";
+    }
+
+const userContent = typeof request.contents === "string"
+      ? request.contents
+      : JSON.stringify(request.contents);
+
+const messages = [];
+    if (request.systemInstruction) {
+      messages.push({
+        role: "system",
+        content: request.systemInstruction,
+      });
+    }
+    messages.push({
+      role: "user",
+      content: userContent,
+    });
+
+const controller = new AbortController();
+    const timeoutMs = request.timeoutMs ?? 60000;
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+const response = await fetch(`${this.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers,
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: request.model,
+        messages,
+        temperature: request.temperature ?? 0.8,
+        response_format: request.responseMimeType === "application/json" 
+          ? { type: "json_object" } 
+          : undefined,
+      }),
+    }).finally(() => {
+      clearTimeout(timeoutId);
+    });
+
+if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: response.statusText } }));
+      throw new Error(error.error?.message || `OpenRouter API error: ${response.statusText}`);
+    }
+
+const data = await response.json();
+    return {
+      text: data.choices?.[0]?.message?.content || "",
+    };
+  }
+
+validateConfig(): boolean {
+    return !!this.config.apiKey;
+  }
+
+async getAvailableModels(): Promise<string[]> {
+    try {
+      const headers: Record<string, string> = {
+        "Authorization": `Bearer ${this.config.apiKey}`,
+        ...this.config.headers,
+      };
+
+const response = await fetch(`${this.baseUrl}/models`, {
+        headers,
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data.data?.map((m: any) => m.id) || [];
+      }
+    } catch (e) {
+      console.warn("Failed to fetch OpenRouter models", e);
+    }
+    
+    return [
+      "openai/gpt-4o",
+      "openai/gpt-4-turbo",
+      "openai/gpt-3.5-turbo",
+      "anthropic/claude-3.5-sonnet",
+      "google/gemini-pro-1.5",
+    ];
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/providers/providerFactory.ts ---
+import { AIProvider, AIProviderConfig } from "../../types";
+import { GeminiProvider } from "./geminiProvider";
+import { OpenRouterProvider } from "./openRouterProvider";
+import { OpenAPIProvider } from "./openApiProvider";
+
+export function createProvider(config: AIProviderConfig): AIProvider {
+  switch (config.type) {
+    case "gemini":
+      return new GeminiProvider(config);
+    case "openrouter":
+      return new OpenRouterProvider(config);
+    case "openapi":
+      return new OpenAPIProvider(config);
+    default:
+      throw new Error(`Unknown provider type: ${config.type}`);
+  }
+}
+
+export function getDefaultModelForProvider(type: AIProviderConfig["type"]): string {
+  switch (type) {
+    case "gemini":
+      return "gemini-3-flash-preview";
+    case "openrouter":
+      return "openai/gpt-4o-mini";
+    case "openapi":
+      return "gpt-4o-mini";
+    default:
+      return "gemini-3-flash-preview";
+  }
+}
+
+const HIGH_CONTEXT_OPENROUTER_MODEL_PATTERNS = [
+  /gpt-4\.1/i,
+  /gpt-4o/i,
+  /o1/i,
+  /o3/i,
+  /claude-3\.5/i,
+  /claude-3\.7/i,
+  /claude-sonnet-4/i,
+  /gemini-1\.5/i,
+  /gemini-2\.[05]/i,
+  /llama-3\.1-70b/i,
+  /llama-3\.1-405b/i,
+  /qwen2\.5-72b/i,
+  /deepseek-r1/i,
+];
+
+export function getMaxTracksForProvider(config?: AIProviderConfig): number {
+  if (!config) return 7;
+
+if (config.type !== "openrouter") {
+    return 7;
+  }
+
+const model = (config.model || "").trim();
+  if (!model) {
+    return 10;
+  }
+
+const highContext = HIGH_CONTEXT_OPENROUTER_MODEL_PATTERNS.some((pattern) =>
+    pattern.test(model)
+  );
+
+return highContext ? 15 : 10;
+}
+
+export function validateProviderConfig(config: AIProviderConfig): boolean {
+  if (!config || !config.type) {
+    return false;
+  }
+
+switch (config.type) {
+    case "gemini":
+      return !!config.apiKey && !!config.model;
+    case "openrouter":
+      return !!config.apiKey && !!config.model;
+    case "openapi":
+      return !!config.baseUrl && !!config.model;
+    default:
+      return false;
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/offlineSyncService.ts ---
+import { getLyricAlignment, getSunoClip, getSunoFeedAll, getSunoPlaylist } from './sunoApi';
+import { generateLrc, generateSrt, groupWordsByTiming, stripMetaTags } from '../utils/lyrics';
+import {
+  OfflinePlaylist,
+  OfflineTrack,
+  getSyncMeta,
+  listAllTracks,
+  setSyncMeta,
+  upsertPlaylists,
+  upsertTracks,
+} from './offlineDb';
+
+export interface SyncProgress {
+  phase: 'fetching' | 'diffing' | 'upserting' | 'caching-assets' | 'done';
+  completed: number;
+  total: number;
+  message: string;
+}
+
+export interface SyncResult {
+  added: number;
+  updated: number;
+  unchanged: number;
+  failedAssets: number;
+}
+
+const LAST_SYNC_META_KEY = 'lastSyncAt';
+
+const toTags = (raw: string | undefined): string[] => {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+};
+
+const buildTrack = (clip: any, now: number, prev?: OfflineTrack): OfflineTrack => {
+  const metadata = clip?.metadata || {};
+  const audioUrl = clip?.audio_url || clip?.song_path || clip?.audioUrl || '';
+  const imageUrl = clip?.image_large_url || clip?.image_url || '';
+  const promptLyrics = metadata.prompt || prev?.lyricsText || '';
+  return {
+    id: clip.id,
+    sunoId: clip.id,
+    title: clip.title || 'Untitled',
+    audioUrl,
+    imageUrl,
+    lyricsText: promptLyrics,
+    lrcContent: prev?.lrcContent || '',
+    srtContent: prev?.srtContent || '',
+    metadata: {
+      tags: toTags(metadata.tags),
+      prompt: metadata.prompt || '',
+      durationMs: Math.round((metadata.duration || 0) * 1000),
+    },
+    cachedLocally: prev?.cachedLocally || false,
+    raw: clip,
+    createdAt: prev?.createdAt || now,
+    updatedAt: now,
+  };
+};
+
+const isTrackEqual = (a: OfflineTrack, b: OfflineTrack) => {
+  return (
+    a.title === b.title &&
+    a.audioUrl === b.audioUrl &&
+    a.imageUrl === b.imageUrl &&
+    a.metadata.prompt === b.metadata.prompt &&
+    a.metadata.durationMs === b.metadata.durationMs &&
+    a.metadata.tags.join('|') === b.metadata.tags.join('|') &&
+    a.lyricsText === b.lyricsText &&
+    a.lrcContent === b.lrcContent &&
+    a.srtContent === b.srtContent
+  );
+};
+
+const enrichTrackLyricsAndCaptions = async (track: OfflineTrack, cookie: string): Promise<OfflineTrack> => {
+  if (!cookie || !track.id) return track;
+  try {
+    const clip = await getSunoClip(track.id, cookie);
+    const prompt = clip?.metadata?.prompt || track.metadata.prompt || track.lyricsText || '';
+    const cleanLyrics = stripMetaTags(prompt);
+
+let lrcContent = track.lrcContent || '';
+    let srtContent = track.srtContent || '';
+
+try {
+      const alignment = await getLyricAlignment(track.id, cookie);
+      const alignedWords = Array.isArray(alignment?.aligned_words) ? alignment.aligned_words : [];
+      if (alignedWords.length > 0) {
+        const lines = groupWordsByTiming(alignedWords);
+        lrcContent = generateLrc(lines);
+        srtContent = generateSrt(lines);
+      }
+    } catch {
+      // Alignment can fail for some tracks; still keep lyrics cached.
+    }
+
+return {
+      ...track,
+      lyricsText: cleanLyrics || prompt,
+      lrcContent,
+      srtContent,
+      raw: clip || track.raw,
+    };
+  } catch {
+    return track;
+  }
+};
+
+const collectAssetUrls = (tracks: OfflineTrack[]): string[] => {
+  const urls = new Set<string>();
+  for (const track of tracks) {
+    if (track.audioUrl) urls.add(track.audioUrl);
+    if (track.imageUrl) urls.add(track.imageUrl);
+  }
+  return [...urls];
+};
+
+async function requestCacheAssets(urls: string[], onProgress?: (p: SyncProgress) => void): Promise<number> {
+  if (!urls.length || !('serviceWorker' in navigator)) return 0;
+
+const registration = await navigator.serviceWorker.ready;
+  if (!registration.active) return urls.length;
+
+const requestId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  let failedAssets = 0;
+
+await new Promise<void>((resolve) => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || data.type !== 'CACHE_PROGRESS' || data.requestId !== requestId) return;
+
+onProgress?.({
+        phase: data.done ? 'done' : 'caching-assets',
+        completed: data.completed,
+        total: data.total,
+        message: `Caching assets ${data.completed}/${data.total}`,
+      });
+
+if (data.done) {
+        navigator.serviceWorker.removeEventListener('message', onMessage);
+        resolve();
+      }
+    };
+
+navigator.serviceWorker.addEventListener('message', onMessage);
+    registration.active?.postMessage({ type: 'CACHE_ASSETS', urls, requestId });
+  });
+
+// Conservative fallback estimation for cross-origin failures, if any URLs still uncached.
+  if ('caches' in window) {
+    caches.open('suno-architect-assets-v1').then(async (cache) => {
+      const checks = await Promise.all(
+        urls.map(async (url) => {
+          try {
+            const hit = await cache.match(url, { ignoreVary: true });
+            return !!hit;
+          } catch {
+            return false;
+          }
+        })
+      );
+      failedAssets = checks.filter((x) => !x).length;
+    });
+  }
+
+return failedAssets;
+}
+
+export async function downloadAccountCache(
+  cookie: string,
+  playlistIds: string[] = [],
+  onProgress?: (p: SyncProgress) => void
+): Promise<SyncResult> {
+  onProgress?.({ phase: 'fetching', completed: 0, total: 1, message: 'Fetching remote account metadata…' });
+  const feed = await getSunoFeedAll(cookie, 100);
+  const remoteClips = Array.isArray(feed?.clips) ? feed.clips : [];
+
+const remotePlaylists: OfflinePlaylist[] = [];
+  if (playlistIds.length) {
+    for (let i = 0; i < playlistIds.length; i += 1) {
+      const id = playlistIds[i];
+      try {
+        const pl = await getSunoPlaylist(id, cookie);
+        const playlistClips = Array.isArray(pl?.playlist_clips) ? pl.playlist_clips : [];
+        remotePlaylists.push({
+          id,
+          title: pl?.name || `Playlist ${id}`,
+          description: pl?.description || '',
+          coverArtUrl: pl?.image_url,
+          trackIds: playlistClips.map((entry: any) => entry?.clip?.id).filter(Boolean),
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          raw: pl,
+        });
+      } catch {
+        // Partial failure allowed.
+      }
+      onProgress?.({ phase: 'fetching', completed: i + 1, total: playlistIds.length, message: `Fetched playlists ${i + 1}/${playlistIds.length}` });
+    }
+  }
+
+onProgress?.({ phase: 'diffing', completed: 0, total: remoteClips.length, message: 'Diffing remote vs local state…' });
+  const localTracks = await listAllTracks();
+  const localMap = new Map(localTracks.map((t) => [t.id, t]));
+
+const now = Date.now();
+  const toWrite: OfflineTrack[] = [];
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+
+remoteClips.forEach((clip: any, idx: number) => {
+    const prev = localMap.get(clip.id);
+    const next = buildTrack(clip, now, prev);
+    if (!prev) {
+      added += 1;
+      toWrite.push(next);
+    } else if (!isTrackEqual(prev, next)) {
+      updated += 1;
+      toWrite.push(next);
+    } else {
+      unchanged += 1;
+    }
+    onProgress?.({ phase: 'diffing', completed: idx + 1, total: remoteClips.length, message: `Compared ${idx + 1}/${remoteClips.length} tracks` });
+  });
+
+const enrichedTracks: OfflineTrack[] = [];
+  for (let i = 0; i < toWrite.length; i += 1) {
+    const track = toWrite[i];
+    const enriched = await enrichTrackLyricsAndCaptions(track, cookie);
+    enrichedTracks.push(enriched);
+    onProgress?.({
+      phase: 'upserting',
+      completed: i + 1,
+      total: toWrite.length,
+      message: `Caching lyrics/LRC ${i + 1}/${toWrite.length}`,
+    });
+  }
+
+onProgress?.({ phase: 'upserting', completed: 0, total: enrichedTracks.length, message: 'Persisting metadata to IndexedDB…' });
+  await upsertTracks(enrichedTracks);
+  await upsertPlaylists(remotePlaylists);
+  await setSyncMeta(LAST_SYNC_META_KEY, now);
+
+const refreshedLocal = await listAllTracks();
+  const assetUrls = collectAssetUrls(refreshedLocal);
+  const failedAssets = await requestCacheAssets(assetUrls, onProgress);
+
+onProgress?.({ phase: 'done', completed: 1, total: 1, message: 'Account cache is up to date.' });
+  return { added, updated, unchanged, failedAssets };
+}
+
+export const getLastAccountSync = async (): Promise<number | undefined> => {
+  return getSyncMeta<number>(LAST_SYNC_META_KEY);
+};
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/wavEncoder.ts ---
+export async function encodeWavAsync(
+  audioBuffer: AudioBuffer,
+  targetSampleRate: number,
+  bitDepth: 16 | 24,
+  options?: {
+    onProgress?: (progress: number) => void;
+    shouldCancel?: () => boolean;
+    chunkSize?: number;
+  }
+): Promise<Uint8Array> {
+  const onProgress = options?.onProgress;
+  const shouldCancel = options?.shouldCancel;
+  const chunkSize = Math.max(1024, options?.chunkSize ?? 65536);
+
+const safeBitDepth: 16 | 24 = bitDepth === 24 ? 24 : 16;
+  const numChannels = audioBuffer.numberOfChannels;
+  const sampleRate = targetSampleRate || audioBuffer.sampleRate;
+  const bytesPerSample = safeBitDepth / 8;
+
+const channels: Float32Array[] = [];
+  for (let ch = 0; ch < numChannels; ch++) {
+    channels.push(audioBuffer.getChannelData(ch));
+  }
+
+const numSamples = channels[0]?.length ?? 0;
+  const dataSize = numSamples * numChannels * bytesPerSample;
+  const out = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(out);
+
+const writeString = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+  };
+
+writeString(0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, 'WAVE');
+  writeString(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * bytesPerSample, true);
+  view.setUint16(32, numChannels * bytesPerSample, true);
+  view.setUint16(34, safeBitDepth, true);
+  writeString(36, 'data');
+  view.setUint32(40, dataSize, true);
+
+const maxVal = safeBitDepth === 16 ? 32767 : 8388607;
+  let offset = 44;
+
+for (let i = 0; i < numSamples; i += chunkSize) {
+    if (shouldCancel?.()) throw new Error('Cancelled');
+    const end = Math.min(i + chunkSize, numSamples);
+
+for (let s = i; s < end; s++) {
+      for (let ch = 0; ch < numChannels; ch++) {
+        const sample = Math.max(-1, Math.min(1, channels[ch][s]));
+        const intSample = Math.round(sample * maxVal);
+
+if (safeBitDepth === 16) {
+          view.setInt16(offset, intSample, true);
+          offset += 2;
+        } else {
+          const clamped = Math.max(-8388607, Math.min(8388607, intSample));
+          view.setUint8(offset, clamped & 0xff);
+          view.setUint8(offset + 1, (clamped >> 8) & 0xff);
+          view.setUint8(offset + 2, (clamped >> 16) & 0xff);
+          offset += 3;
+        }
+      }
+    }
+
+onProgress?.(end / numSamples);
+    if (end < numSamples) await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+
+onProgress?.(1);
+  return new Uint8Array(out);
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/nativeMasteringPipeline.ts ---
+import { MasteringSettings } from '../offlineDb';
+import { encodeWavAsync } from './wavEncoder';
+
+const worker = new Worker(new URL('./masteringWorker.ts', import.meta.url), { type: 'module' });
+
+export interface NativeMasteringProgress {
+  phase: 'decode' | 'render' | 'encode';
+  progress: number;
+  message: string;
+}
+
+export interface NativeMasteringResult {
+  blob: Blob;
+  fileName: string;
+  settingsForVariant: MasteringSettings;
+}
+
+export interface NativePreviewRenderResult {
+  originalBuffer: AudioBuffer;
+  previewBuffer: AudioBuffer;
+  measuredLufs?: number;
+}
+
+export function createDefaultMasteringSettings(): MasteringSettings {
+  return {
+    inputGain: 0,
+    glueCompression: false,
+    deharsh: true,
+    cleanLowEnd: true,
+    autoLevel: false,
+    addPunch: true,
+    stereoWidth: 100,
+    centerBass: true,
+    cutMud: false,
+    addAir: true,
+    tapeWarmth: true,
+    normalizeLoudness: true,
+    targetLufs: -14,
+    truePeakLimit: true,
+    ceiling: -1,
+    sampleRate: 48000,
+    bitDepth: 24,
+    eq: {
+      low: 0,
+      lowMid: 0,
+      mid: 0,
+      highMid: 0,
+      high: 0,
+    },
+  };
+}
+
+export async function decodeAudioBlobToBuffer(blob: Blob): Promise<AudioBuffer> {
+  // Try using audio element as fallback decoder
+  return new Promise((resolve, reject) => {
+    const audio = new Audio();
+    audio.src = URL.createObjectURL(blob);
+    audio.onloadedmetadata = () => {
+      console.log('[DEBUG AUDIO DECODE] Audio element metadata:', {
+        duration: audio.duration,
+        src: audio.src,
+        readyState: audio.readyState,
+      });
+    };
+    audio.oncanplaythrough = () => {
+      console.log('[DEBUG AUDIO DECODE] Audio element can play through');
+      URL.revokeObjectURL(audio.src);
+    };
+    audio.onerror = () => {
+      console.error('[DEBUG AUDIO DECODE] Audio element error');
+      URL.revokeObjectURL(audio.src);
+      reject(new Error('Audio element decode failed'));
+    };
+    
+    // Fallback to Web Audio API
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    blob.arrayBuffer().then(arrayBuffer => {
+      ctx.decodeAudioData(arrayBuffer)
+        .then(audioBuffer => {
+          console.log('[DEBUG AUDIO DECODE] Web Audio API decode success:', {
+            duration: audioBuffer.duration,
+            length: audioBuffer.length,
+            sampleRate: audioBuffer.sampleRate,
+            numberOfChannels: audioBuffer.numberOfChannels,
+          });
+          resolve(audioBuffer);
+        })
+        .catch(err => {
+          console.error('[DEBUG AUDIO DECODE] Web Audio API decode failed:', err);
+          reject(err);
+        })
+        .finally(() => {
+          ctx.close();
+        });
+    });
+  });
+}
+
+function createAudioBuffer(channels: Float32Array[], sampleRate: number): AudioBuffer {
+  const length = channels[0]?.length ?? 0;
+  const audioBuffer = new AudioBuffer({
+    numberOfChannels: channels.length,
+    length,
+    sampleRate,
+  });
+  channels.forEach((channel, index) => audioBuffer.copyToChannel(channel, index));
+  return audioBuffer;
+}
+
+export async function renderNativeMasteredWavFromBlob(
+  inputBlob: Blob,
+  sourceFileName: string,
+  settings: MasteringSettings,
+  onProgress?: (update: NativeMasteringProgress) => void
+): Promise<NativeMasteringResult> {
+  onProgress?.({ phase: 'decode', progress: 0.1, message: 'Decoding source...' });
+  const decoded = await decodeAudioBlobToBuffer(inputBlob);
+  
+  onProgress?.({ phase: 'render', progress: 0.3, message: 'Processing DSP chain...' });
+  const masteredChannels = await runMasteringWorker(decoded, settings);
+  
+  onProgress?.({ phase: 'encode', progress: 0.8, message: 'Encoding WAV...' });
+  const masteredBuffer = createAudioBuffer(masteredChannels, decoded.sampleRate);
+  const wavBlob = await encodeWavAsync(masteredBuffer, decoded.sampleRate, (settings.bitDepth || 24) as 16 | 24);
+  
+  onProgress?.({ phase: 'encode', progress: 1.0, message: 'Done' });
+  const fileName = sourceFileName.replace(/\.[^/.]+$/, "") + " (Mastered).wav";
+  
+  return { 
+    blob: new Blob([wavBlob], { type: 'audio/wav' }), 
+    fileName, 
+    settingsForVariant: settings 
+  };
+}
+
+export async function renderNativePreviewBufferFromBlob(
+  inputBlob: Blob,
+  settings: MasteringSettings,
+  onProgress?: (update: NativeMasteringProgress) => void
+): Promise<NativePreviewRenderResult> {
+  onProgress?.({ phase: 'decode', progress: 0.1, message: 'Decoding source for preview...' });
+  const decoded = await decodeAudioBlobToBuffer(inputBlob);
+  
+  onProgress?.({ phase: 'render', progress: 0.5, message: 'Rendering preview DSP...' });
+  const masteredChannels = await runMasteringWorker(decoded, settings);
+  const previewBuffer = createAudioBuffer(masteredChannels, decoded.sampleRate);
+  
+  return { 
+    originalBuffer: decoded, 
+    previewBuffer: previewBuffer 
+  };
+}
+
+async function runMasteringWorker(buffer: AudioBuffer, settings: MasteringSettings): Promise<Float32Array[]> {
+  return new Promise((resolve, reject) => {
+    const id = Math.random();
+    const channels: Float32Array[] = [];
+    const transferables: ArrayBuffer[] = [];
+    
+    for (let i = 0; i < buffer.numberOfChannels; i++) {
+      const data = buffer.getChannelData(i).slice();
+      channels.push(data);
+      transferables.push(data.buffer);
+    }
+
+const handler = (e: MessageEvent) => {
+      if (e.data.id === id) {
+        worker.removeEventListener('message', handler);
+        if (e.data.success) {
+          resolve(e.data.result.channels);
+        } else {
+          reject(new Error(e.data.error || 'Worker DSP error'));
+        }
+      }
+    };
+
+worker.addEventListener('message', handler);
+    worker.postMessage({ 
+      id, 
+      data: { 
+        channels, 
+        sampleRate: buffer.sampleRate, 
+        settings 
+      } 
+    }, transferables);
+  });
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/masteringWorker.ts ---
+import { ProLimiter } from './dsp/fx/limiter';
+import { Compressor } from './dsp/fx/compressor';
+import { MultibandCompressor } from './dsp/fx/multiband_compressor';
+import { Saturation } from './dsp/fx/saturation';
+import { StereoImager } from './dsp/fx/stereo_imager';
+import { MasteringEQ } from './dsp/fx/mastering_eq';
+import { DeEsser } from './dsp/fx/deesser';
+import { TransientShaper } from './dsp/fx/transient_shaper';
+import { Metering } from './dsp/fx/metering';
+import { Reverb } from './dsp/fx/reverb';
+import { Chorus } from './dsp/fx/chorus';
+import { dbToLinear } from './dsp/utils';
+
+// We'll instantiate FX per-message to ensure clean state and correct sampleRate
+self.onmessage = async (e) => {
+  const { id, data } = e.data;
+  const { channels, sampleRate, settings } = data;
+
+if (!channels || !channels[0]) {
+    self.postMessage({ id, success: false, error: 'No audio data provided' });
+    return;
+  }
+
+try {
+    // 1. Initialize FX with current sampleRate
+    const limiter = new ProLimiter(sampleRate);
+    const mbComp = new MultibandCompressor(sampleRate);
+    const saturation = new Saturation(0);
+    const imager = new StereoImager(sampleRate);
+    const eq = new MasteringEQ(sampleRate);
+    const deesser = new DeEsser(sampleRate);
+    const shaper = new TransientShaper(sampleRate);
+    const metering = new Metering(sampleRate);
+    const reverb = new Reverb(sampleRate);
+
+// 2. Configure FX from settings
+    limiter.setCeiling(settings.ceiling ?? -1);
+    
+    if (settings.tapeWarmth) {
+        saturation.setDrive(2.0); // Subtle warmth
+        saturation.setMix(0.4);
+    } else {
+        saturation.setMix(0);
+    }
+
+imager.setWidth((settings.stereoWidth ?? 100) / 100);
+    imager.setBassMono(!!settings.centerBass);
+    
+    if (settings.addPunch) {
+        shaper.setAttack(2.0);
+    } else {
+        shaper.setAttack(0);
+    }
+
+if (settings.deharsh) {
+        deesser.setThreshold(-24);
+        deesser.setRatio(4);
+    } else {
+        deesser.setRatio(1);
+    }
+    
+    // Set EQ from settings.eq
+    if (settings.eq) {
+      eq.setMidBand(0, 100, 0.7, settings.eq.low ?? 0);
+      eq.setMidBand(1, 400, 1.0, settings.eq.lowMid ?? 0);
+      eq.setMidBand(2, 1000, 1.0, settings.eq.mid ?? 0);
+      eq.setMidBand(3, 4000, 1.0, settings.eq.highMid ?? 0);
+      eq.setMidBand(4, 12000, 0.7, settings.eq.high ?? 0);
+      
+      // Add air if requested
+      if (settings.addAir) {
+        eq.setHighShelf(15000, 0.707, 3.0);
+      }
+      // Cut mud if requested
+      if (settings.cutMud) {
+        eq.setMidBand(1, 250, 2.0, -3.0);
+      }
+    }
+
+// 3. Process Chain
+    const inputGainLinear = dbToLinear(settings.inputGain ?? 0);
+    const len = channels[0].length;
+    const numChannels = channels.length;
+
+// Apply Input Gain
+    if (inputGainLinear !== 1.0) {
+        for (let ch = 0; ch < numChannels; ch++) {
+          for (let i = 0; i < len; i++) channels[ch][i] *= inputGainLinear;
+        }
+    }
+
+// Chain: Saturation -> EQ -> MB Compressor -> Imager -> Reverb (subtle air) -> De-Esser -> Shaper
+    saturation.process(channels);
+    eq.process(channels);
+    
+    if (settings.glueCompression) {
+        mbComp.process(channels);
+    }
+    
+    imager.process(channels);
+    
+    if (settings.addAir) {
+      reverb.setMix(0.04); // Very subtle air / space
+      reverb.process(channels);
+    }
+
+if (settings.deharsh) {
+        deesser.process(channels);
+    }
+    
+    if (settings.addPunch) {
+        shaper.process(channels);
+    }
+
+// 4. Loudness Analysis & Normalization (Optional)
+    if (settings.normalizeLoudness || settings.autoLevel) {
+      metering.reset();
+      metering.process(channels);
+      const currentLufs = metering.getLufs();
+      const targetLufs = settings.targetLufs || -14;
+      const gainRequired = dbToLinear(targetLufs - currentLufs);
+      
+      // Safety: cap auto-gain at +12dB to prevent extreme noise floor boost
+      const safeGain = Math.min(gainRequired, dbToLinear(12));
+      
+      if (Math.abs(safeGain - 1.0) > 0.001) {
+          for (let ch = 0; ch < numChannels; ch++) {
+            for (let i = 0; i < len; i++) channels[ch][i] *= safeGain;
+          }
+      }
+    }
+
+// 5. Final Limiter
+    limiter.process(channels);
+
+// Send back result
+    self.postMessage({ id, success: true, result: { channels } }, channels.map((c: Float32Array) => c.buffer));
+  } catch (err: any) {
+    console.error('Mastering Worker Error:', err);
+    self.postMessage({ id, success: false, error: err.message || 'Unknown DSP processing error' });
+  }
+};
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/wamDspWorker.ts ---
+export type WamWorkerProgressHandler = (progress: number, status?: string) => void;
+
+type PendingRequest = {
+  resolve: (value: any) => void;
+  reject: (reason?: unknown) => void;
+  onProgress?: WamWorkerProgressHandler | null;
+  timeoutId?: number;
+};
+
+type WorkerProgressMessage = {
+  id: number;
+  type: 'PROGRESS';
+  progress: number;
+  status?: string;
+};
+
+type WorkerResultMessage = {
+  id: number;
+  success: boolean;
+  result?: any;
+  error?: string;
+};
+
+export interface WamRenderFullChainResult {
+  audioBuffer: AudioBuffer;
+  lufs: number;
+  measuredLufs?: number;
+}
+
+export interface WamWorkerRenderSettings {
+  normalizeLoudness: boolean;
+  targetLufs: number;
+  truePeakLimit: boolean;
+  truePeakCeiling: number;
+  cleanLowEnd: boolean;
+  glueCompression: boolean;
+  deharsh: boolean;
+  stereoWidth: number;
+  centerBass: boolean;
+  cutMud: boolean;
+  addAir: boolean;
+  tapeWarmth: boolean;
+  autoLevel: boolean;
+  addPunch: boolean;
+  sampleRate: number;
+  bitDepth: number;
+  inputGain: number;
+  eqLow: number;
+  eqLowMid: number;
+  eqMid: number;
+  eqHighMid: number;
+  eqHigh: number;
+}
+
+export class WamDSPWorkerClient {
+  private worker: Worker | null = null;
+  private pending = new Map<number, PendingRequest>();
+  private nextId = 0;
+  private readonly requestTimeoutMs = 120000;
+  isReady = false;
+
+async init() {
+    if (this.worker) return;
+    this.worker = new Worker('/web-audio-master/workers/dsp-worker.js', { type: 'module' });
+    this.worker.onmessage = (e) => this.handleMessage(e.data as WorkerProgressMessage | WorkerResultMessage);
+    this.worker.onerror = (e) => {
+      console.error('[WamDSPWorkerClient] Worker error', e);
+      this.failAllPending(new Error('W-A-M DSP worker failed to load or crashed. Check console/network for /web-audio-master worker asset errors.'));
+      this.isReady = false;
+    };
+    this.worker.onmessageerror = () => {
+      this.failAllPending(new Error('W-A-M DSP worker message serialization failed.'));
+    };
+    this.isReady = true;
+  }
+
+terminate() {
+    if (!this.worker) return;
+    this.worker.terminate();
+    this.worker = null;
+    this.isReady = false;
+    for (const req of this.pending.values()) {
+      req.reject(new Error('Worker terminated'));
+    }
+    this.pending.clear();
+  }
+
+async renderFullChain(
+    audioBuffer: AudioBuffer,
+    settings: WamWorkerRenderSettings,
+    mode: 'preview' | 'export' = 'export',
+    onProgress?: WamWorkerProgressHandler
+  ): Promise<WamRenderFullChainResult> {
+    const { channels, sampleRate, transferables } = this.extractChannelData(audioBuffer);
+    const result = await this.send(
+      'RENDER_FULL_CHAIN',
+      { channels, sampleRate, settings, mode },
+      onProgress ?? null,
+      transferables
+    );
+
+return {
+      audioBuffer: this.createAudioBuffer(result.channels as Float32Array[], sampleRate),
+      lufs: result.lufs,
+      measuredLufs: result.measuredLufs,
+    };
+  }
+
+private handleMessage(data: WorkerProgressMessage | WorkerResultMessage) {
+    if ((data as WorkerProgressMessage).type === 'PROGRESS') {
+      const progressMsg = data as WorkerProgressMessage;
+      const pending = this.pending.get(progressMsg.id);
+      pending?.onProgress?.(progressMsg.progress, progressMsg.status);
+      return;
+    }
+
+const msg = data as WorkerResultMessage;
+    const pending = this.pending.get(msg.id);
+    if (!pending) return;
+    if (pending.timeoutId) window.clearTimeout(pending.timeoutId);
+    this.pending.delete(msg.id);
+
+if (msg.success) {
+      pending.resolve(msg.result);
+    } else {
+      pending.reject(new Error(msg.error || 'Unknown worker error'));
+    }
+  }
+
+private send(type: string, data: any, onProgress: WamWorkerProgressHandler | null, transferables: Transferable[]) {
+    if (!this.worker) {
+      return Promise.reject(new Error('Worker not initialized'));
+    }
+
+return new Promise<any>((resolve, reject) => {
+      const id = this.nextId++;
+      const timeoutId = window.setTimeout(() => {
+        const pending = this.pending.get(id);
+        if (!pending) return;
+        this.pending.delete(id);
+        pending.reject(new Error(`W-A-M DSP worker timed out after ${Math.round(this.requestTimeoutMs / 1000)}s (${type})`));
+      }, this.requestTimeoutMs);
+
+this.pending.set(id, { resolve, reject, onProgress, timeoutId });
+
+try {
+        this.worker!.postMessage({ type, id, data }, transferables);
+      } catch (error) {
+        window.clearTimeout(timeoutId);
+        this.pending.delete(id);
+        reject(error);
+      }
+    });
+  }
+
+private failAllPending(error: Error) {
+    for (const [id, pending] of this.pending.entries()) {
+      if (pending.timeoutId) window.clearTimeout(pending.timeoutId);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
+  }
+
+private extractChannelData(audioBuffer: AudioBuffer) {
+    const channels: Float32Array[] = [];
+    const transferables: ArrayBuffer[] = [];
+
+for (let i = 0; i < audioBuffer.numberOfChannels; i++) {
+      const channelData = audioBuffer.getChannelData(i).slice();
+      channels.push(channelData);
+      transferables.push(channelData.buffer);
+    }
+
+return {
+      channels,
+      sampleRate: audioBuffer.sampleRate,
+      transferables,
+    };
+  }
+
+private createAudioBuffer(channels: Float32Array[], sampleRate: number): AudioBuffer {
+    const length = channels[0]?.length ?? 0;
+    const audioBuffer = new AudioBuffer({
+      numberOfChannels: channels.length,
+      length,
+      sampleRate,
+    });
+    channels.forEach((channel, index) => audioBuffer.copyToChannel(channel, index));
+    return audioBuffer;
+  }
+}
+
+let sharedClient: WamDSPWorkerClient | null = null;
+
+export async function getWamDSPWorkerClient() {
+  if (!sharedClient) {
+    sharedClient = new WamDSPWorkerClient();
+  }
+  await sharedClient.init();
+  return sharedClient;
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/types.ts ---
+export interface AudioBlock {
+  channels: Float32Array[];
+  sampleRate: number;
+}
+
+export interface Processor {
+  process(block: AudioBlock): void;
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/utils.ts ---
+export class BiquadFilter {
+  private b0 = 1; private b1 = 0; private b2 = 0;
+  private a0 = 1; private a1 = 0; private a2 = 0;
+  // Direct Form I state (x1, x2, y1, y2) per channel
+  private x1 = [0, 0]; private x2 = [0, 0];
+  private y1 = [0, 0]; private y2 = [0, 0];
+
+private setCoefficients(b0: number, b1: number, b2: number, a0: number, a1: number, a2: number) {
+    this.b0 = b0 / a0;
+    this.b1 = b1 / a0;
+    this.b2 = b2 / a0;
+    this.a1 = a1 / a0;
+    this.a2 = a2 / a0;
+  }
+
+setLowPass(freq: number, q: number, sampleRate: number) {
+    const w0 = 2 * Math.PI * freq / sampleRate;
+    const cosw0 = Math.cos(w0);
+    const alpha = Math.sin(w0) / (2 * q);
+    this.setCoefficients(
+      (1 - cosw0) / 2,
+      1 - cosw0,
+      (1 - cosw0) / 2,
+      1 + alpha,
+      -2 * cosw0,
+      1 - alpha
+    );
+  }
+
+setHighPass(freq: number, q: number, sampleRate: number) {
+    const w0 = 2 * Math.PI * freq / sampleRate;
+    const cosw0 = Math.cos(w0);
+    const alpha = Math.sin(w0) / (2 * q);
+    this.setCoefficients(
+      (1 + cosw0) / 2,
+      -(1 + cosw0),
+      (1 + cosw0) / 2,
+      1 + alpha,
+      -2 * cosw0,
+      1 - alpha
+    );
+  }
+
+setLowShelf(freq: number, q: number, gainDb: number, sampleRate: number) {
+    const w0 = 2 * Math.PI * freq / sampleRate;
+    const A = Math.pow(10, gainDb / 40);
+    const alpha = Math.sin(w0) / (2 * q);
+    const cosw0 = Math.cos(w0);
+    const twoSqrtAAlpha = 2 * Math.sqrt(A) * alpha;
+
+this.setCoefficients(
+      A * ((A + 1) - (A - 1) * cosw0 + twoSqrtAAlpha),
+      2 * A * ((A - 1) - (A + 1) * cosw0),
+      A * ((A + 1) - (A - 1) * cosw0 - twoSqrtAAlpha),
+      (A + 1) + (A - 1) * cosw0 + twoSqrtAAlpha,
+      -2 * ((A - 1) + (A + 1) * cosw0),
+      (A + 1) + (A - 1) * cosw0 - twoSqrtAAlpha
+    );
+  }
+
+setHighShelf(freq: number, q: number, gainDb: number, sampleRate: number) {
+    const w0 = 2 * Math.PI * freq / sampleRate;
+    const A = Math.pow(10, gainDb / 40);
+    const alpha = Math.sin(w0) / (2 * q);
+    const cosw0 = Math.cos(w0);
+    const twoSqrtAAlpha = 2 * Math.sqrt(A) * alpha;
+
+this.setCoefficients(
+      A * ((A + 1) + (A - 1) * cosw0 + twoSqrtAAlpha),
+      -2 * A * ((A - 1) + (A + 1) * cosw0),
+      A * ((A + 1) + (A - 1) * cosw0 - twoSqrtAAlpha),
+      (A + 1) - (A - 1) * cosw0 + twoSqrtAAlpha,
+      2 * ((A - 1) - (A + 1) * cosw0),
+      (A + 1) - (A - 1) * cosw0 - twoSqrtAAlpha
+    );
+  }
+
+setPeaking(freq: number, q: number, gainDb: number, sampleRate: number) {
+    const w0 = 2 * Math.PI * freq / sampleRate;
+    const A = Math.pow(10, gainDb / 40);
+    const alpha = Math.sin(w0) / (2 * q);
+    const cosw0 = Math.cos(w0);
+
+this.setCoefficients(
+      1 + alpha * A,
+      -2 * cosw0,
+      1 - alpha * A,
+      1 + alpha / A,
+      -2 * cosw0,
+      1 - alpha / A
+    );
+  }
+
+setAllPass(freq: number, q: number, sampleRate: number) {
+    const w0 = 2 * Math.PI * freq / sampleRate;
+    const alpha = Math.sin(w0) / (2 * q);
+    const cosw0 = Math.cos(w0);
+    this.setCoefficients(
+      1 - alpha,
+      -2 * cosw0,
+      1 + alpha,
+      1 + alpha,
+      -2 * cosw0,
+      1 - alpha
+    );
+  }
+
+process(x: number, channel = 0) {
+    if (this.x1.length <= channel) {
+      this.x1.push(0); this.x2.push(0);
+      this.y1.push(0); this.y2.push(0);
+    }
+    
+    // Direct Form I
+    const y = this.b0 * x + this.b1 * this.x1[channel] + this.b2 * this.x2[channel] 
+            - this.a1 * this.y1[channel] - this.a2 * this.y2[channel];
+    
+    // Check for NaN or Infinity to prevent cascade failure
+    if (!Number.isFinite(y)) {
+        this.reset();
+        return 0;
+    }
+
+this.x2[channel] = this.x1[channel];
+    this.x1[channel] = x;
+    this.y2[channel] = this.y1[channel];
+    this.y1[channel] = y;
+    
+    return y;
+  }
+  
+  reset() {
+    this.x1.fill(0); this.x2.fill(0);
+    this.y1.fill(0); this.y2.fill(0);
+  }
+}
+
+export class DelayLine {
+  private buffer: Float32Array;
+  private ptr = 0;
+  private size: number;
+
+constructor(maxSize: number) {
+    this.size = maxSize;
+    this.buffer = new Float32Array(maxSize);
+  }
+
+push(x: number) {
+    this.buffer[this.ptr] = x;
+    this.ptr = (this.ptr + 1) % this.size;
+  }
+
+// Read value from 'delaySamples' ago
+  read(delaySamples: number): number {
+    // Current ptr points to the "next" index to be written.
+    // Index 'ptr-1' is the last written sample (delay=0).
+    // Index 'ptr-delaySamples' is 'delaySamples' ago.
+    let readIdx = (this.ptr - Math.floor(delaySamples)) % this.size;
+    while (readIdx < 0) readIdx += this.size;
+    return this.buffer[readIdx];
+  }
+
+// Fractional delay with linear interpolation
+  readFrac(delaySamples: number): number {
+    const dInt = Math.floor(delaySamples);
+    const dFrac = delaySamples - dInt;
+    const s1 = this.read(dInt);
+    const s2 = this.read(dInt + 1);
+    return s1 + dFrac * (s2 - s1);
+  }
+  
+  reset() {
+      this.buffer.fill(0);
+      this.ptr = 0;
+  }
+}
+
+/**
+ * Linkwitz-Riley 4th Order Crossover.
+ * Formed by cascading two 2nd order Butterworth filters.
+ */
+export class LinkwitzRileyFilter {
+  private lp1 = new BiquadFilter();
+  private lp2 = new BiquadFilter();
+  private hp1 = new BiquadFilter();
+  private hp2 = new BiquadFilter();
+
+constructor(freq: number, sampleRate: number) {
+    const q = 0.7071067811865476; // Butterworth Q
+    this.lp1.setLowPass(freq, q, sampleRate);
+    this.lp2.setLowPass(freq, q, sampleRate);
+    this.hp1.setHighPass(freq, q, sampleRate);
+    this.hp2.setHighPass(freq, q, sampleRate);
+  }
+
+process(x: number, channel = 0): { low: number, high: number } {
+    const low = this.lp2.process(this.lp1.process(x, channel), channel);
+    const high = this.hp2.process(this.hp1.process(x, channel), channel);
+    return { low, high };
+  }
+}
+
+export function dbToLinear(db: number) { return Math.pow(10, db / 20); }
+export function linearToDb(linear: number) { 
+  if (linear <= 1e-10) return -200;
+  return 20 * Math.log10(linear); 
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/chorus.ts ---
+import { DelayLine } from '../utils';
+
+/**
+ * Chorus Effect: Uses modulated delay lines to create width and thickness.
+ */
+export class Chorus {
+  private delayL: DelayLine;
+  private delayR: DelayLine;
+  private lfoPhase = 0;
+  private lfoRate = 0.5; // Hz
+  private lfoDepth = 20; // Samples
+  private mix = 0.3;
+  private sampleRate = 48000;
+
+constructor(sampleRate: number) {
+    this.sampleRate = sampleRate;
+    this.delayL = new DelayLine(Math.floor(sampleRate * 0.1));
+    this.delayR = new DelayLine(Math.floor(sampleRate * 0.1));
+  }
+
+setMix(m: number) { this.mix = m; }
+  setRate(r: number) { this.lfoRate = r; }
+  setDepth(d: number) { this.lfoDepth = d; }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    if (numChannels < 2) return;
+
+const len = channels[0].length;
+    const lfoInc = (2 * Math.PI * this.lfoRate) / this.sampleRate;
+    const baseDelay = Math.floor(this.sampleRate * 0.02); // 20ms
+
+for (let i = 0; i < len; i++) {
+      this.lfoPhase += lfoInc;
+      if (this.lfoPhase > 2 * Math.PI) this.lfoPhase -= 2 * Math.PI;
+
+const offset = Math.sin(this.lfoPhase) * this.lfoDepth;
+      const offsetR = Math.sin(this.lfoPhase + Math.PI) * this.lfoDepth;
+
+const l = channels[0][i];
+      const r = channels[1][i];
+
+this.delayL.push(l);
+      this.delayR.push(r);
+
+const modL = this.delayL.readFrac(baseDelay + offset);
+      const modR = this.delayR.readFrac(baseDelay + offsetR);
+
+channels[0][i] = l * (1 - this.mix) + modL * this.mix;
+      channels[1][i] = r * (1 - this.mix) + modR * this.mix;
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/mastering_eq.ts ---
+import { BiquadFilter, dbToLinear } from '../utils';
+
+/**
+ * Mastering EQ: Multi-band parametric EQ with Mid/Side support.
+ */
+export class MasteringEQ {
+  private midBands: BiquadFilter[] = [];
+  private sideBands: BiquadFilter[] = [];
+  private lowShelfMid = new BiquadFilter();
+  private lowShelfSide = new BiquadFilter();
+  private highShelfMid = new BiquadFilter();
+  private highShelfSide = new BiquadFilter();
+  private sampleRate = 48000;
+
+constructor(sampleRate: number) {
+    this.sampleRate = sampleRate;
+    // Standard 5 peaking bands
+    for (let i = 0; i < 5; i++) {
+      this.midBands.push(new BiquadFilter());
+      this.sideBands.push(new BiquadFilter());
+    }
+    this.resetBands();
+  }
+
+private resetBands() {
+    const freqs = [100, 400, 1000, 4000, 12000];
+    const qs = [0.7, 1.0, 1.0, 1.0, 0.7];
+    for (let i = 0; i < 5; i++) {
+      this.midBands[i].setPeaking(freqs[i], qs[i], 0, this.sampleRate);
+      this.sideBands[i].setPeaking(freqs[i], qs[i], 0, this.sampleRate);
+    }
+    this.lowShelfMid.setLowShelf(80, 0.707, 0, this.sampleRate);
+    this.lowShelfSide.setLowShelf(80, 0.707, 0, this.sampleRate);
+    this.highShelfMid.setHighShelf(12000, 0.707, 0, this.sampleRate);
+    this.highShelfSide.setHighShelf(12000, 0.707, 0, this.sampleRate);
+  }
+
+setMidBand(bandIdx: number, freq: number, q: number, gainDb: number) {
+    if (bandIdx >= 0 && bandIdx < 5) {
+      this.midBands[bandIdx].setPeaking(freq, q, gainDb, this.sampleRate);
+    }
+  }
+
+setSideBand(bandIdx: number, freq: number, q: number, gainDb: number) {
+    if (bandIdx >= 0 && bandIdx < 5) {
+      this.sideBands[bandIdx].setPeaking(freq, q, gainDb, this.sampleRate);
+    }
+  }
+
+setHighShelf(freq: number, q: number, gainDb: number) {
+    this.highShelfMid.setHighShelf(freq, q, gainDb, this.sampleRate);
+  }
+
+setLowShelf(freq: number, q: number, gainDb: number) {
+    this.lowShelfMid.setLowShelf(freq, q, gainDb, this.sampleRate);
+  }
+
+process(channels: Float32Array[]) {
+    if (channels.length < 2) {
+      // Mono path
+      const L = channels[0];
+      const len = L.length;
+      for (let i = 0; i < len; i++) {
+        let x = L[i];
+        x = this.lowShelfMid.process(x, 0);
+        for (let b = 0; b < 5; b++) x = this.midBands[b].process(x, 0);
+        x = this.highShelfMid.process(x, 0);
+        L[i] = x;
+      }
+      return;
+    }
+
+const L = channels[0];
+    const R = channels[1];
+    const len = L.length;
+
+for (let i = 0; i < len; i++) {
+      const l = L[i];
+      const r = R[i];
+
+let mid = (l + r) / 2;
+      let side = (l - r) / 2;
+
+// Apply Mid EQ
+      mid = this.lowShelfMid.process(mid, 0);
+      for (let b = 0; b < 5; b++) mid = this.midBands[b].process(mid, 0);
+      mid = this.highShelfMid.process(mid, 0);
+
+// Apply Side EQ
+      side = this.lowShelfSide.process(side, 0);
+      for (let b = 0; b < 5; b++) side = this.sideBands[b].process(side, 0);
+      side = this.highShelfSide.process(side, 0);
+
+// Re-combine
+      L[i] = mid + side;
+      R[i] = mid - side;
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/deesser.ts ---
+import { BiquadFilter, dbToLinear, linearToDb } from '../utils';
+import { Compressor } from './compressor';
+
+/**
+ * De-Esser: A dynamic EQ specifically tuned for the 4-10kHz range.
+ * Reduces sibilance by compressing the signal only when high-frequency content is dominant.
+ */
+export class DeEsser {
+  private scFilter = new BiquadFilter(); // Sidechain filter
+  private compressor: Compressor;
+  private freq = 6000;
+
+constructor(sampleRate: number) {
+    this.compressor = new Compressor(sampleRate);
+    this.scFilter.setHighPass(this.freq, 0.707, sampleRate);
+    
+    // De-Esser standard settings
+    this.compressor.setThreshold(-24);
+    this.compressor.setRatio(6); // High ratio for de-essing
+    this.compressor.setAttack(0.001); // Fast attack
+    this.compressor.setRelease(0.05); // Fast release
+  }
+
+setThreshold(db: number) { this.compressor.setThreshold(db); }
+  setRatio(r: number) { this.compressor.setRatio(r); }
+  
+  setFrequency(f: number, sampleRate: number) {
+    this.freq = f;
+    this.scFilter.setHighPass(f, 0.707, sampleRate);
+  }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+
+for (let i = 0; i < len; i++) {
+      let maxSc = 0;
+      for (let ch = 0; ch < numChannels; ch++) {
+        // Feed sidechain filter with each channel's sample
+        const scSample = this.scFilter.process(channels[ch][i], ch);
+        maxSc = Math.max(maxSc, Math.abs(scSample));
+      }
+
+// Calculate gain reduction based on maximum sidechain sample (linked)
+      const gain = this.compressor.processSample(maxSc);
+
+// Apply gain reduction to original signal
+      for (let ch = 0; ch < numChannels; ch++) {
+        channels[ch][i] *= gain;
+      }
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/metering.ts ---
+import { BiquadFilter, linearToDb } from '../utils';
+
+/**
+ * Metering: Implements K-weighted LUFS metering (ITU-R BS.1770).
+ */
+export class Metering {
+  private preFilter = new BiquadFilter(); // Pre-filter for LUFS
+  private rlbFilter = new BiquadFilter(); // RLB-filter for LUFS
+  private sampleRate = 48000;
+  private sumSquares = 0;
+  private sampleCount = 0;
+
+constructor(sampleRate: number) {
+    this.sampleRate = sampleRate;
+    // K-Weighting coefficients
+    // Pre-filter: High shelf @ 1.5kHz, +4dB
+    this.preFilter.setHighShelf(1500, 1.0, 4.0, sampleRate);
+    // RLB-filter: High pass @ 100Hz
+    this.rlbFilter.setHighPass(100, 0.707, sampleRate);
+  }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+
+for (let i = 0; i < len; i++) {
+      let channelSum = 0;
+      for (let ch = 0; ch < numChannels; ch++) {
+        let x = channels[ch][i];
+        
+        if (!Number.isFinite(x)) {
+            x = 0;
+        }
+
+// Apply K-weighting
+        x = this.preFilter.process(x, ch);
+        x = this.rlbFilter.process(x, ch);
+        
+        if (!Number.isFinite(x)) x = 0;
+        
+        channelSum += x * x;
+      }
+      this.sumSquares += channelSum / numChannels;
+      this.sampleCount++;
+    }
+  }
+
+getLufs(): number {
+    if (this.sampleCount === 0) return -144;
+    const meanSquare = this.sumSquares / this.sampleCount;
+    // ITU-R BS.1770-4: LUFS = -0.691 + 10 * log10(sum(wi * mean(xi^2)))
+    // For stereo, wi=1.0 for L/R.
+    // Our sumSquares is already mean(L^2 + R^2) / 2
+    const lufs = -0.691 + 10 * Math.log10(Math.max(1e-12, meanSquare));
+    return lufs;
+  }
+
+reset() {
+    this.sumSquares = 0;
+    this.sampleCount = 0;
+    this.preFilter.reset();
+    this.rlbFilter.reset();
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/stereo_imager.ts ---
+import { BiquadFilter, dbToLinear } from '../utils';
+
+/**
+ * Stereo Imager: Controls width and mono compatibility.
+ * Implements M/S processing for width and a high-pass on the side channel for mono bass.
+ */
+export class StereoImager {
+  private width = 1.0; // Linear width multiplier
+  private sideHp = new BiquadFilter();
+  private sideHpFreq = 200; // Hz
+  private bassMono = true;
+
+constructor(sampleRate: number) {
+    this.sideHp.setHighPass(this.sideHpFreq, 0.707, sampleRate);
+  }
+
+setWidth(w: number) { this.width = w; }
+  setBassMono(enable: boolean) { this.bassMono = enable; }
+  setBassMonoFreq(f: number, sampleRate: number) {
+    this.sideHpFreq = f;
+    this.sideHp.setHighPass(f, 0.707, sampleRate);
+  }
+
+process(channels: Float32Array[]) {
+    if (channels.length < 2) return; // Stereo only
+
+const len = channels[0].length;
+    const L = channels[0];
+    const R = channels[1];
+
+for (let i = 0; i < len; i++) {
+      const l = L[i];
+      const r = R[i];
+
+// Convert to Mid/Side
+      let mid = (l + r) / 2;
+      let side = (l - r) / 2;
+
+// Apply width control
+      side *= this.width;
+
+// Apply bass mono (HP on side channel)
+      if (this.bassMono) {
+        side = this.sideHp.process(side, 0);
+      }
+
+// Re-combine to L/R
+      L[i] = mid + side;
+      R[i] = mid - side;
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/multiband_compressor.ts ---
+import { LinkwitzRileyFilter } from '../utils';
+import { Compressor } from './compressor';
+
+export class MultibandCompressor {
+  private lowMidXover: LinkwitzRileyFilter;
+  private midHighXover: LinkwitzRileyFilter;
+  
+  private lowComp: Compressor;
+  private midComp: Compressor;
+  private highComp: Compressor;
+
+constructor(sampleRate: number) {
+    this.lowMidXover = new LinkwitzRileyFilter(200, sampleRate);
+    this.midHighXover = new LinkwitzRileyFilter(3000, sampleRate);
+
+this.lowComp = new Compressor(sampleRate);
+    this.midComp = new Compressor(sampleRate);
+    this.highComp = new Compressor(sampleRate);
+
+// Default "Glue" settings
+    this.lowComp.setThreshold(-18);
+    this.lowComp.setRatio(2.5);
+    this.lowComp.setAttack(0.02);
+    this.lowComp.setRelease(0.2);
+
+this.midComp.setThreshold(-20);
+    this.midComp.setRatio(2.0);
+    this.midComp.setAttack(0.01);
+    this.midComp.setRelease(0.15);
+
+this.highComp.setThreshold(-22);
+    this.highComp.setRatio(2.0);
+    this.highComp.setAttack(0.005);
+    this.highComp.setRelease(0.1);
+  }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+
+for (let i = 0; i < len; i++) {
+      const bandLow: number[] = [];
+      const bandMid: number[] = [];
+      const bandHigh: number[] = [];
+
+// 1. Split each channel into 3 bands
+      for (let ch = 0; ch < numChannels; ch++) {
+        const x = channels[ch][i];
+        const { low, high: midHigh } = this.lowMidXover.process(x, ch);
+        const { low: mid, high } = this.midHighXover.process(midHigh, ch);
+        
+        bandLow.push(low);
+        bandMid.push(mid);
+        bandHigh.push(high);
+      }
+
+// 2. Compute linked gain reduction per band
+      let maxLow = 0, maxMid = 0, maxHigh = 0;
+      for (let ch = 0; ch < numChannels; ch++) {
+        maxLow = Math.max(maxLow, Math.abs(bandLow[ch]));
+        maxMid = Math.max(maxMid, Math.abs(bandMid[ch]));
+        maxHigh = Math.max(maxHigh, Math.abs(bandHigh[ch]));
+      }
+
+const lowG = this.lowComp.processSample(maxLow);
+      const midG = this.midComp.processSample(maxMid);
+      const highG = this.highComp.processSample(maxHigh);
+
+// 3. Recombine and write back
+      for (let ch = 0; ch < numChannels; ch++) {
+        channels[ch][i] = (bandLow[ch] * lowG) + (bandMid[ch] * midG) + (bandHigh[ch] * highG);
+      }
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/saturation.ts ---
+import { dbToLinear } from '../utils';
+
+/**
+ * Saturation: Implements tape/analog saturation modeling.
+ * Using a soft-clipping function to add harmonics and warmth.
+ */
+export class Saturation {
+  private drive = 1.0; // Linear gain
+  private mix = 1.0; // Wet/Dry mix
+  
+  constructor(driveDb: number) {
+    this.drive = dbToLinear(driveDb);
+  }
+
+setDrive(db: number) { this.drive = dbToLinear(db); }
+  setMix(m: number) { this.mix = m; }
+
+private softClip(x: number): number {
+    // tanh-based soft clipping
+    return Math.tanh(x);
+  }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+
+for (let i = 0; i < len; i++) {
+      for (let ch = 0; ch < numChannels; ch++) {
+        const x = channels[ch][i];
+        const driven = x * this.drive;
+        const saturated = this.softClip(driven);
+        
+        // Compensate gain (roughly, using Math.max to avoid division by zero)
+        const output = (saturated / Math.max(1, this.drive)) * this.mix + x * (1 - this.mix);
+        channels[ch][i] = output;
+      }
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/reverb.ts ---
+import { DelayLine } from '../utils';
+
+/**
+ * Low-pass Feedback Comb Filter (LPFBCF)
+ */
+class CombFilter {
+  private delay: DelayLine;
+  private feedback: number;
+  private damp: number;
+  private lastOut = 0;
+
+constructor(size: number, feedback: number, damp: number) {
+    this.delay = new DelayLine(size);
+    this.feedback = feedback;
+    this.damp = damp;
+  }
+
+process(x: number): number {
+    const output = this.delay.read(0); // Actually the delayed value
+    // Dampening: simple low-pass in the feedback loop
+    this.lastOut = (output * (1 - this.damp)) + (this.lastOut * this.damp);
+    
+    // Feedback: x + damp_out * feedback
+    this.delay.push(x + this.lastOut * this.feedback);
+    
+    return output;
+  }
+  
+  reset() {
+      this.delay.reset();
+      this.lastOut = 0;
+  }
+}
+
+/**
+ * All-Pass Filter for diffusion
+ */
+class AllPassFilter {
+  private delay: DelayLine;
+  private feedback: number;
+
+constructor(size: number, feedback: number) {
+    this.delay = new DelayLine(size);
+    this.feedback = feedback;
+  }
+
+process(x: number): number {
+    const delayOut = this.delay.read(0);
+    const output = -x + delayOut;
+    this.delay.push(x + delayOut * this.feedback);
+    return output;
+  }
+  
+  reset() {
+      this.delay.reset();
+  }
+}
+
+/**
+ * Algorithmic Reverb based on Freeverb architecture.
+ * Refined for better stereo width and stability.
+ */
+export class Reverb {
+  private combsL: CombFilter[] = [];
+  private combsR: CombFilter[] = [];
+  private allpassesL: AllPassFilter[] = [];
+  private allpassesR: AllPassFilter[] = [];
+  
+  private mix = 0.1;
+  private readonly stereoSpread = 23;
+
+constructor(sampleRate: number) {
+    const combSizes = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617];
+    const allPassSizes = [556, 441, 341, 225];
+    
+    const feedback = 0.84;
+    const damp = 0.2;
+
+for (const size of combSizes) {
+      const s = Math.floor(size * (sampleRate / 44100));
+      this.combsL.push(new CombFilter(s, feedback, damp));
+      this.combsR.push(new CombFilter(s + this.stereoSpread, feedback, damp));
+    }
+    
+    for (const size of allPassSizes) {
+      const s = Math.floor(size * (sampleRate / 44100));
+      this.allpassesL.push(new AllPassFilter(s, 0.5));
+      this.allpassesR.push(new AllPassFilter(s + this.stereoSpread, 0.5));
+    }
+  }
+
+setMix(m: number) { this.mix = m; }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+
+for (let i = 0; i < len; i++) {
+      let inL = channels[0][i];
+      let inR = numChannels > 1 ? channels[1][i] : inL;
+
+let outL = 0;
+      let outR = 0;
+
+// Parallel combs
+      for (let j = 0; j < this.combsL.length; j++) {
+        outL += this.combsL[j].process(inL);
+        outR += this.combsR[j].process(inR);
+      }
+
+// Serial all-passes
+      for (let j = 0; j < this.allpassesL.length; j++) {
+        outL = this.allpassesL[j].process(outL);
+        outR = this.allpassesR[j].process(outR);
+      }
+
+// Mix back
+      channels[0][i] = inL * (1 - this.mix) + outL * this.mix * 0.1;
+      if (numChannels > 1) {
+        channels[1][i] = inR * (1 - this.mix) + outR * this.mix * 0.1;
+      }
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/limiter.ts ---
+import { dbToLinear } from '../utils';
+
+export class ProLimiter {
+  private ceiling = dbToLinear(-1);
+  private releaseTime = 0.05; // 50ms
+  private env = 0;
+  private sampleRate = 48000;
+
+constructor(sampleRate = 48000) {
+    this.sampleRate = sampleRate;
+  }
+
+setCeiling(db: number) { this.ceiling = dbToLinear(db); }
+  setRelease(seconds: number) { this.releaseTime = seconds; }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+    
+    // Exponential release coefficient
+    const releaseCoef = Math.exp(-1 / (this.sampleRate * this.releaseTime));
+
+for (let i = 0; i < len; i++) {
+      let maxAbs = 0;
+      for (let ch = 0; ch < numChannels; ch++) {
+        const x = channels[ch][i];
+        if (!Number.isFinite(x)) {
+            channels[ch][i] = 0;
+        } else {
+            maxAbs = Math.max(maxAbs, Math.abs(x));
+        }
+      }
+
+// Attack is instant (limiter)
+      if (maxAbs > this.env) {
+        this.env = maxAbs;
+      } else {
+        this.env = releaseCoef * this.env + (1 - releaseCoef) * maxAbs;
+      }
+
+// Limiting gain
+      let gain = (this.env > this.ceiling) ? (this.ceiling / this.env) : 1;
+      
+      // Safety: clamp gain
+      if (!Number.isFinite(gain) || gain < 0) gain = 1;
+
+for (let ch = 0; ch < numChannels; ch++) {
+        channels[ch][i] *= gain;
+      }
+    }
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/compressor.ts ---
+import { dbToLinear, linearToDb } from '../utils';
+
+export class Compressor {
+  private thresholdLinear = dbToLinear(-20);
+  private ratio = 4;
+  private attack = 0.01; // seconds
+  private release = 0.1; // seconds
+  private knee = 0; // dB
+  private makeUpGainLinear = dbToLinear(0);
+  
+  private env = 0;
+  private sampleRate = 48000;
+
+constructor(sampleRate: number) {
+    this.sampleRate = sampleRate;
+  }
+
+setThreshold(db: number) { this.thresholdLinear = dbToLinear(db); }
+  setRatio(r: number) { this.ratio = r; }
+  setAttack(s: number) { this.attack = s; }
+  setRelease(s: number) { this.release = s; }
+  setKnee(db: number) { this.knee = db; }
+  setMakeUpGain(db: number) { this.makeUpGainLinear = dbToLinear(db); }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+    
+    const attackCoef = Math.exp(-1 / (this.sampleRate * this.attack));
+    const releaseCoef = Math.exp(-1 / (this.sampleRate * this.release));
+
+for (let i = 0; i < len; i++) {
+      let maxAbs = 0;
+      for (let ch = 0; ch < numChannels; ch++) {
+        maxAbs = Math.max(maxAbs, Math.abs(channels[ch][i]));
+      }
+
+// Detector (Peak)
+      if (maxAbs > this.env) {
+        this.env = attackCoef * this.env + (1 - attackCoef) * maxAbs;
+      } else {
+        this.env = releaseCoef * this.env + (1 - releaseCoef) * maxAbs;
+      }
+
+// Gain reduction calculation
+      let gain = 1;
+      if (this.env > 0) {
+        const envDb = linearToDb(this.env);
+        const thresholdDb = linearToDb(this.thresholdLinear);
+        
+        if (envDb > thresholdDb) {
+          const grDb = (envDb - thresholdDb) * (1 / this.ratio - 1);
+          gain = dbToLinear(grDb);
+        }
+      }
+
+// Apply gain + make-up
+      const totalGain = gain * this.makeUpGainLinear;
+      for (let ch = 0; ch < numChannels; ch++) {
+        channels[ch][i] *= totalGain;
+      }
+    }
+  }
+
+// Process a single sample across multiple channels and return gain reduction
+  // Note: This expects the input to be the MAX absolute sample across channels for linked compression
+  processSample(maxAbs: number): number {
+    const attackCoef = Math.exp(-1 / (this.sampleRate * this.attack));
+    const releaseCoef = Math.exp(-1 / (this.sampleRate * this.release));
+
+if (maxAbs > this.env) {
+      this.env = attackCoef * this.env + (1 - attackCoef) * maxAbs;
+    } else {
+      this.env = releaseCoef * this.env + (1 - releaseCoef) * maxAbs;
+    }
+
+let gain = 1;
+    if (this.env > 0) {
+      const envDb = linearToDb(this.env);
+      const thresholdDb = linearToDb(this.thresholdLinear);
+      
+      if (envDb > thresholdDb) {
+        const grDb = (envDb - thresholdDb) * (1 / this.ratio - 1);
+        gain = dbToLinear(grDb);
+      }
+    }
+    return gain * this.makeUpGainLinear;
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/services/mastering/dsp/fx/transient_shaper.ts ---
+import { dbToLinear } from '../utils';
+
+/**
+ * Transient Shaper: Adjusts the attack and sustain of audio independently.
+ * Useful for making drums punchier or controlling tail length.
+ */
+export class TransientShaper {
+  private attackGain = 1.0; // Linear gain
+  private sustainGain = 1.0; // Linear gain
+  
+  private fastEnv = 0;
+  private slowEnv = 0;
+  
+  private attackMs = 5;
+  private sustainMs = 50;
+  private sampleRate = 48000;
+
+constructor(sampleRate: number) {
+    this.sampleRate = sampleRate;
+  }
+
+setAttack(db: number) { this.attackGain = dbToLinear(db); }
+  setSustain(db: number) { this.sustainGain = dbToLinear(db); }
+
+process(channels: Float32Array[]) {
+    const numChannels = channels.length;
+    const len = channels[0].length;
+
+const fastCoef = Math.exp(-1 / (this.sampleRate * (this.attackMs / 1000)));
+    const slowCoef = Math.exp(-1 / (this.sampleRate * (this.sustainMs / 1000)));
+
+for (let i = 0; i < len; i++) {
+      let maxAbs = 0;
+      for (let ch = 0; ch < numChannels; ch++) {
+        maxAbs = Math.max(maxAbs, Math.abs(channels[ch][i]));
+      }
+
+// Fast envelope follower (transients)
+      if (maxAbs > this.fastEnv) this.fastEnv = maxAbs;
+      else this.fastEnv += (maxAbs - this.fastEnv) * (1 - fastCoef);
+
+// Slow envelope follower (sustain)
+      if (maxAbs > this.slowEnv) this.slowEnv = maxAbs;
+      else this.slowEnv += (maxAbs - this.slowEnv) * (1 - slowCoef);
+
+// Transient detection
+      const transient = this.fastEnv - this.slowEnv;
+      const attackMod = transient * (this.attackGain - 1);
+      const sustainMod = this.slowEnv * (this.sustainGain - 1);
+      
+      // Calculate final sample-wise gain modification
+      // This is a simplified approach
+      const totalGain = (maxAbs + attackMod + sustainMod) / (maxAbs + 0.00001);
+      
+      for (let ch = 0; ch < numChannels; ch++) {
+        channels[ch][i] *= totalGain;
+      }
+    }
+  }
+}
+
+```
+
+```json
+# --- File: /home/tim/Suno-Architect/tsconfig.json ---
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "experimentalDecorators": true,
+    "useDefineForClassFields": false,
+    "module": "ESNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "moduleResolution": "bundler",
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
+  }
+}
+```
+
+```json
+# --- File: /home/tim/Suno-Architect/package.json ---
+{
+  "name": "suno-architect-api-intergration",
+  "private": true,
+  "version": "1.2.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@google/genai": "^1.42.0",
+    "fft.js": "^4.0.4",
+    "idb": "^8.0.3",
+    "jszip": "^3.10.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "wavesurfer.js": "^7.12.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@tailwindcss/vite": "^4.2.0",
+    "@types/node": "^22.19.11",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.4",
+    "tailwindcss": "^4.2.0",
+    "typescript": "~5.8.3",
+    "vite": "^6.4.1",
+    "wrangler": "^4.67.0"
+  },
+  "overrides": {
+    "minimatch": "^10.2.1"
+  }
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/tests/e2e/navigation-and-visualizer.spec.ts ---
+import fs from 'node:fs';
+import path from 'node:path';
+import { expect, test } from '@playwright/test';
+
+test('persists selected tab through URL/local state reload', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('[data-view-tab="albums"]').click();
+  await expect(page).toHaveURL(/\?view=albums$/);
+
+await page.reload();
+  await expect(page).toHaveURL(/\?view=albums$/);
+
+await page.locator('[data-view-tab="visualizer"]').click();
+  await expect(page).toHaveURL(/\?view=visualizer$/);
+
+await page.reload();
+  await expect(page).toHaveURL(/\?view=visualizer$/);
+});
+
+test('persists pre/post roll and preview intro settings in visualizer session', async ({ page }) => {
+  await page.goto('/?view=visualizer');
+
+await page.getByPlaceholder('Or paste Suno ID / UUID manually...').fill('draft_playwright_clip');
+  await page.getByRole('button', { name: 'Load ID' }).click();
+  await expect(page).toHaveURL(/clipId=draft_playwright_clip/);
+
+await expect(page.getByText('Visual & Export Settings')).toBeVisible();
+
+await page.locator('[data-testid="preroll-toggle"]').click();
+  await page.locator('[data-testid="preroll-text"]').fill('Playwright Pre Roll');
+  await page.locator('[data-testid="preroll-seconds"]').fill('6');
+  await page.locator('[data-testid="preroll-preview-toggle"]').check();
+  await page.locator('[data-testid="preroll-preview-start"]').fill('12');
+  await page.locator('[data-testid="preroll-preview-duration"]').fill('8');
+
+await page.locator('[data-testid="postroll-toggle"]').click();
+  await page.locator('[data-testid="postroll-text"]').fill('Playwright Post Roll');
+
+await page.reload();
+  await expect(page).toHaveURL(/clipId=draft_playwright_clip/);
+  await expect(page.getByText('Visual & Export Settings')).toBeVisible();
+
+await expect(page.locator('[data-testid="preroll-text"]')).toHaveValue('Playwright Pre Roll');
+  await expect(page.locator('[data-testid="preroll-seconds"]')).toHaveValue('6');
+  await expect(page.locator('[data-testid="preroll-preview-toggle"]')).toBeChecked();
+  await expect(page.locator('[data-testid="preroll-preview-start"]')).toHaveValue('12');
+  await expect(page.locator('[data-testid="preroll-preview-duration"]')).toHaveValue('8');
+  await expect(page.locator('[data-testid="postroll-text"]')).toHaveValue('Playwright Post Roll');
+});
+
+test('saves default logo and keeps it available across reload', async ({ page }) => {
+  const logoPath = path.join(process.cwd(), 'private', 'logo.png');
+  test.skip(!fs.existsSync(logoPath), 'private/logo.png is required for this test.');
+
+await page.goto('/?view=visualizer');
+  await page.getByPlaceholder('Or paste Suno ID / UUID manually...').fill('draft_logo_test');
+  await page.getByRole('button', { name: 'Load ID' }).click();
+  await expect(page.getByText('Visual & Export Settings')).toBeVisible();
+
+await page.locator('input[type="file"][accept="image/png, image/jpeg, image/webp"]').setInputFiles(logoPath);
+  await page.getByTestId('save-default-logo').click();
+
+await page.reload();
+  await expect(page.getByText('logo.png')).toBeVisible();
+});
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/vite-env.d.ts ---
+/// <reference types="vite/client" />
+
+interface ImportMetaEnv {
+  readonly VITE_GEMINI_API_KEY?: string;
+  readonly VITE_OPENROUTER_API_KEY?: string;
+  readonly VITE_OPENAPI_API_KEY?: string;
+  readonly VITE_OPENAPI_BASE_URL?: string;
+  readonly VITE_AI_PROVIDER_TYPE?: string;
+  readonly VITE_AI_PROVIDER_MODEL?: string;
+  readonly VITE_SUNO_PROXY_URL?: string;
+  readonly VITE_APP_VERSION?: string;
+  readonly VITE_APP_COMMIT?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
+```
+
+```js
+# --- File: /home/tim/Suno-Architect/public/offline-sw.js ---
+const ASSET_CACHE = 'suno-architect-assets-v1';
+const CACHEABLE_EXTENSIONS = ['.mp3', '.wav', '.png', '.jpg', '.jpeg'];
+
+const isCacheableAsset = (url) => {
+    const lower = url.pathname.toLowerCase();
+    return CACHEABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+};
+
+self.addEventListener('install', () => {
+    self.skipWaiting();
+});
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (!msg || msg.type !== 'CACHE_ASSETS' || !Array.isArray(msg.urls)) return;
+
+const { urls, requestId } = msg;
+    event.waitUntil(cacheAssets(urls, requestId));
+});
+
+self.addEventListener('fetch', (event) => {
+    const request = event.request;
+    if (request.method !== 'GET') return;
+
+let url;
+    try {
+        url = new URL(request.url);
+    } catch {
+        return;
+    }
+
+if (!isCacheableAsset(url)) return;
+
+event.respondWith(
+        caches.open(ASSET_CACHE).then(async (cache) => {
+            const cached = await cache.match(request, { ignoreVary: true });
+            if (cached) return cached;
+
+try {
+                const networkResponse = await fetch(request);
+                if (networkResponse.ok) {
+                    cache.put(request, networkResponse.clone()).catch(() => undefined);
+                }
+                return networkResponse;
+            } catch {
+                return new Response('Offline asset unavailable', { status: 503 });
+            }
+        })
+    );
+});
+
+async function cacheAssets(urls, requestId) {
+    const cache = await caches.open(ASSET_CACHE);
+    let completed = 0;
+    const total = urls.length;
+
+for (const assetUrl of urls) {
+        try {
+            const request = new Request(assetUrl, { method: 'GET', mode: 'cors' });
+            const existing = await cache.match(request, { ignoreVary: true });
+            if (!existing) {
+                const response = await fetch(request);
+                if (response.ok) {
+                    await cache.put(request, response.clone());
+                }
+            }
+        } catch {
+            // Continue on partial failures.
+        } finally {
+            completed += 1;
+            postProgress({ requestId, completed, total });
+        }
+    }
+
+postProgress({ requestId, completed: total, total, done: true });
+}
+
+async function postProgress(payload) {
+    const clients = await self.clients.matchAll({ type: 'window' });
+    for (const client of clients) {
+        client.postMessage({ type: 'CACHE_PROGRESS', ...payload });
+    }
+}
+
+```

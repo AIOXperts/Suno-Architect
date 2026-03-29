@@ -93,7 +93,7 @@ export const useVisualizer = (
     const [logoPulseSensitivity, setLogoPulseSensitivity] = useState(1.3);
     const [showTitle, setShowTitle] = useState(true);
     const [customAudio, setCustomAudio] = useState<{ url: string, name: string } | null>(null);
-    const [audioBitrate, setAudioBitrate] = useState(192000);
+    const [audioBitrate, setAudioBitrate] = useState(320000);
     const [videoBitrate, setVideoBitrate] = useState(5000000);
     const [videoBitrateMode, setVideoBitrateMode] = useState<'constant' | 'variable'>('variable');
     const [fps, setFps] = useState(30);
@@ -125,6 +125,25 @@ export const useVisualizer = (
     const [fontFamily, setFontFamily] = useState('Inter, sans-serif');
     const [smoothingFactor, setSmoothingFactor] = useState(0.1); 
     const [verticalOffset, setVerticalOffset] = useState(0); 
+    
+    // Color Events State
+    const [colorEvents, setColorEvents] = useState<any[]>([]);
+
+    const addColorEvent = (event: any) => {
+        setColorEvents(prev => [...prev, event].sort((a: any, b: any) => a.time - b.time));
+    };
+
+    const removeColorEvent = (index: number) => {
+        setColorEvents(prev => prev.filter((_, i) => i !== index));
+    };
+
+    const updateColorEvent = (index: number, updatedEvent: any) => {
+        setColorEvents(prev => {
+            const newEvents = [...prev];
+            newEvents[index] = updatedEvent;
+            return newEvents.sort((a: any, b: any) => a.time - b.time);
+        });
+    }; 
 
     // Qt6 Specific Settings
     const [qt6Style, setQt6Style] = useState<Qt6Style>('wave');
@@ -918,6 +937,11 @@ export const useVisualizer = (
     };
 
     const renderFrame = (ctx: CanvasRenderingContext2D, width: number, height: number, time: number, data?: VisualizerFrameData) => {
+        let currentActiveColor = activeColor;
+        const activeEvent = [...colorEvents].reverse().find((e: any) => e.time <= time);
+        if (activeEvent) {
+            currentActiveColor = activeEvent.activeColor;
+        }
         // 1. Background Layer
         ctx.fillStyle = '#1e1e1e';
         ctx.fillRect(0, 0, width, height);
@@ -1015,7 +1039,8 @@ export const useVisualizer = (
             inactiveOpacity,
             smoothingFactor,
             verticalOffset,
-            aspectRatio
+            aspectRatio,
+            colorEvents
         });
 
         if (showTitle && clipData?.title) {
@@ -1037,7 +1062,7 @@ export const useVisualizer = (
         // Title & Progress Bar
         if (clipData && duration) {
             const pct = time / duration;
-            ctx.fillStyle = activeColor;
+            ctx.fillStyle = currentActiveColor;
             ctx.fillRect(0, height - 8, width * pct, 8);
         }
     };

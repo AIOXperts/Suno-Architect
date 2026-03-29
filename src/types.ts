@@ -1,4 +1,8 @@
-
+export interface ColorEvent {
+  time: number;
+  activeColor: string;
+  inactiveColor: string;
+}
 
 export interface ParsedSunoOutput {
   style: string;
@@ -71,7 +75,7 @@ export interface LyricalConstraints {
 }
 
 export interface PromptSettings {
-  version: 'v1' | 'v2' | 'v3' | 'custom';
+  version: 'v1' | 'v2' | 'v3' | 'v4' | 'custom';
   customSystemPrompt: string;
   library: SunoLibrary;
   constraints: LyricalConstraints;

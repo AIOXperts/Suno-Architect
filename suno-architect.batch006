@@ -1,0 +1,2487 @@
+
+
+return (
+    <section className="max-w-7xl mx-auto space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Web-Audio-Master</h2>
+          <p className="text-sm text-slate-400 mt-1">
+            Suno-native mastering workflow using the full Web-Audio-Master engine and DSP chain.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => setShowLibraryPicker(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6a2 2 0 0 1 2-2h3v16H5a2 2 0 0 0-2 2z" />
+              <path d="M21 6a2 2 0 0 0-2-2h-3v16h3a2 2 0 0 1 2 2z" />
+              <path d="M8 4h8v16H8z" />
+            </svg>
+            Select from Library
+          </button>
+          <label className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg font-medium transition-colors cursor-pointer">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Upload WAV
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="audio/*,.mp3,.wav,.flac,.aac,.m4a,.mp4"
+              onChange={handleUploadWav}
+              className="hidden"
+            />
+          </label>
+        </div>
+      </div>
+
+{wavProgress && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-blue-900/30 border border-blue-700/50 rounded-lg">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-400"></div>
+          <span className="text-blue-300 text-sm">{wavProgress}</span>
+        </div>
+      )}
+
+{selectedReference && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-slate-800/50 border border-[var(--app-panel-border)] rounded-lg">
+          <div className="w-10 h-10 rounded-md bg-slate-700/70 grid place-items-center text-slate-300">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 18V5l12-2v13" />
+              <circle cx="6" cy="18" r="3" />
+              <circle cx="18" cy="16" r="3" />
+            </svg>
+          </div>
+          <div className="flex-grow">
+            <p className="text-white font-medium">{selectedReference.track.title}</p>
+            <p className="text-slate-400 text-sm">
+              {selectedReference.variant
+                ? `Reference: ${selectedReference.variant.type} variant`
+                : selectedReference.sourceKind === 'uploaded'
+                  ? 'Reference: local upload'
+                  : 'Reference: Suno library original'}
+            </p>
+          </div>
+          {!selectedReference.variant && selectedReference.sourceKind !== 'uploaded' && (
+            <button
+              onClick={() => handleConvertAndLoad(selectedReference.track)}
+              disabled={isConvertingToWav}
+              className="px-3 py-1.5 text-sm bg-purple-600 hover:bg-purple-500 disabled:bg-slate-600 text-white rounded-lg transition-colors"
+            >
+              Use Suno WAV
+            </button>
+          )}
+        </div>
+      )}
+
+{sourceLooksLikeNonWavLibraryOriginal && (
+        <div className="px-4 py-3 rounded-lg border border-amber-700/50 bg-amber-900/20 text-amber-200 text-sm">
+          This looks like a non-WAV Suno library source (`{selectedSourceFileName}`). Suno MP3/library preview audio can fade out and stop early.
+          Use <span className="font-semibold">Use Suno WAV</span> before Native Preview / Native Master for a full-length source.
+        </div>
+      )}
+
+{saveStatus && (
+        <div className="px-4 py-3 rounded-lg border border-emerald-800/60 bg-emerald-900/20 text-emerald-300 text-sm">
+          {saveStatus}
+        </div>
+      )}
+
+<AppCard className="bg-slate-950/60 border-[var(--app-panel-border)] rounded-xl p-4 space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Native Mastering Pipeline (W-A-M Worker)</h3>
+            <p className="text-sm text-slate-400">
+              Typed React settings + native preview/analyzer + direct W-A-M worker render/export.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setNativeSettings(createDefaultMasteringSettings())}
+              type="button"
+              className="px-3 py-2 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-200 text-sm"
+            >
+              Reset Defaults
+            </button>
+            <button
+              onClick={handleNativeQuickMaster}
+              disabled={!canRunNativeMaster}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-700 disabled:text-slate-400 text-white font-medium transition-colors"
+              title={nativeMasterDisabledReason || 'Render a full master and save it as a library variant'}
+            >
+              {isNativeRendering ? 'Rendering...' : 'Native Master + Save Variant'}
+            </button>
+          </div>
+        </div>
+
+<div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <div className="text-sm text-white font-medium">Native Master Readiness</div>
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className={`px-2 py-1 rounded-md border ${selectedSourceBlob ? 'border-emerald-700/60 text-emerald-200 bg-emerald-950/20' : 'border-slate-700 text-slate-400 bg-slate-900/40'}`}>
+                Source {selectedSourceBlob ? 'Loaded' : 'Missing'}
+              </span>
+              <span className={`px-2 py-1 rounded-md border ${sourceIsLoading ? 'border-blue-700/60 text-blue-200 bg-blue-950/20' : 'border-slate-700 text-slate-400 bg-slate-900/40'}`}>
+                {sourceIsLoading ? 'Source Loading…' : 'Source Idle'}
+              </span>
+              <span className={`px-2 py-1 rounded-md border ${previewReady ? 'border-emerald-700/60 text-emerald-200 bg-emerald-950/20' : previewIsRendering ? 'border-blue-700/60 text-blue-200 bg-blue-950/20' : previewStatus.status === 'error' ? 'border-red-700/60 text-red-200 bg-red-950/20' : 'border-slate-700 text-slate-400 bg-slate-900/40'}`}>
+                {previewReady ? 'Preview Ready' : previewIsRendering ? `Preview Rendering${typeof previewStatus.renderProgress === 'number' ? ` (${Math.round(previewStatus.renderProgress * 100)}%)` : ''}` : previewStatus.status === 'error' ? 'Preview Error' : 'Preview Pending'}
+              </span>
+            </div>
+          </div>
+          <p className="mt-2 text-xs text-slate-400">
+            {canRunNativeMaster
+              ? 'Ready to render a full master and save it as a new library variant.'
+              : nativeMasterDisabledReason || 'Waiting for source and preview readiness.'}
+          </p>
+          {sourceLooksLikeNonWavLibraryOriginal && (
+            <p className="mt-1 text-xs text-amber-300">
+              Source warning: non-WAV Suno library audio may be a preview clip with fade-out behavior.
+            </p>
+          )}
+        </div>
+
+<WebAudioMasterNativeControls settings={nativeSettings} onChange={setNativeSettings} />
+
+<div className="text-xs text-slate-400">
+          Source: {selectedSourceFileName || 'No source selected'}
+        </div>
+        {nativeProgress && (
+          <div className="text-sm text-blue-300 bg-blue-900/20 border border-blue-800/40 rounded-lg px-3 py-2">
+            {nativeProgress}
+          </div>
+        )}
+      </AppCard>
+
+<WebAudioMasterNativePreview
+        sourceBlob={selectedSourceBlob}
+        sourceFileName={selectedSourceFileName}
+        settings={nativeSettings}
+        onStatusChange={setPreviewStatus}
+      />
+
+<LibraryPickerModal
+        isOpen={showLibraryPicker}
+        onClose={() => setShowLibraryPicker(false)}
+        onSelectTrack={handleSelectFromLibrary}
+      />
+    </section>
+  );
+};
+
+export default WebAudioMasterSection;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/OutputSection/AlbumHeader.tsx ---
+import React from 'react';
+
+interface AlbumHeaderProps {
+  trackCount: number;
+  onSyncAll: () => void;
+  syncAllLoading: boolean;
+  sunoCookie?: string;
+}
+
+const AlbumHeader: React.FC<AlbumHeaderProps> = ({ trackCount, onSyncAll, syncAllLoading, sunoCookie }) => {
+  return (
+    <div className="sticky top-[80px] z-40 bg-[var(--app-panel)] backdrop-blur-md border border-purple-500/30 p-4 rounded-2xl flex flex-col sm:flex-row justify-between items-center gap-4 shadow-2xl">
+        <div className="flex items-center gap-3">
+        <div className="w-10 h-10 bg-[var(--app-accent)] rounded-lg flex items-center justify-center text-white font-bold">
+            {trackCount}
+        </div>
+        <div>
+            <h3 className="text-white font-bold">Album Pack Generated</h3>
+            <p className="text-xs text-slate-400">Review {trackCount} tracks below before syncing.</p>
+        </div>
+        </div>
+        
+        <button
+        onClick={onSyncAll}
+        disabled={syncAllLoading || !sunoCookie}
+        className={`w-full sm:w-auto px-6 py-3 rounded-xl font-bold transition-all shadow-lg flex items-center justify-center gap-2
+        ${syncAllLoading 
+            ? 'bg-purple-800 text-white cursor-wait' 
+            : !sunoCookie 
+                ? 'bg-[var(--app-panel)] text-slate-500 cursor-not-allowed'
+                : 'bg-[var(--app-accent)] hover:bg-[var(--app-accent)] text-white shadow-purple-500/20'
+        }`}
+        >
+        {syncAllLoading ? (
+            <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        ) : (
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+        )}
+        {syncAllLoading ? 'Pushing Album...' : 'Sync All to Suno'}
+        </button>
+    </div>
+  );
+};
+
+export default AlbumHeader;
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/OutputSection/OutputSection.tsx ---
+import React, { useState } from 'react';
+import { ParsedSunoOutput } from '../../types';
+import { triggerSunoGeneration } from '../../services/sunoApi';
+import EditSongModal from '../EditSongModal';
+import AlbumHeader from './AlbumHeader';
+import TrackCard from './TrackCard';
+
+interface OutputSectionProps {
+  results: ParsedSunoOutput[];
+  sunoCookie?: string;
+  sunoModel?: string;
+  onSyncSuccess?: (response: any, originalData: ParsedSunoOutput) => void;
+  onUpdateTrack?: (index: number, updatedTrack: ParsedSunoOutput) => void;
+}
+
+const OutputSection: React.FC<OutputSectionProps> = ({ results, sunoCookie, sunoModel, onSyncSuccess, onUpdateTrack }) => {
+  const [syncAllLoading, setSyncAllLoading] = useState(false);
+  const [syncStatuses, setSyncStatuses] = useState<Record<number, {loading: boolean, error?: string, success?: boolean}>>({});
+  
+  // Editing State
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+
+const handleSyncTrack = async (data: ParsedSunoOutput, index: number) => {
+    if (!sunoCookie) return;
+    
+    setSyncStatuses(prev => ({ ...prev, [index]: { loading: true } }));
+    
+    try {
+        const result = await triggerSunoGeneration(data, sunoCookie, sunoModel);
+        setSyncStatuses(prev => ({ ...prev, [index]: { loading: false, success: true } }));
+        if (onSyncSuccess) {
+            onSyncSuccess(result, data);
+        }
+    } catch (err: any) {
+        setSyncStatuses(prev => ({ ...prev, [index]: { loading: false, error: err.message || "Failed" } }));
+    }
+  };
+
+const handleSyncAll = async () => {
+    if (!sunoCookie || results.length === 0) return;
+    setSyncAllLoading(true);
+    
+    // Process sequentially to avoid heavy rate limiting or context mixing
+    for (let i = 0; i < results.length; i++) {
+        const track = results[i];
+        if (syncStatuses[i]?.success) continue;
+        await handleSyncTrack(track, i);
+    }
+    
+    setSyncAllLoading(false);
+  };
+
+const handleSaveEdit = (updatedData: ParsedSunoOutput) => {
+      if (editingIndex !== null && onUpdateTrack) {
+          onUpdateTrack(editingIndex, updatedData);
+      }
+  };
+
+if (!results || results.length === 0) return null;
+
+return (
+    <div className="space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      
+      {/* Album Header Controls */}
+      {results.length > 1 && (
+          <AlbumHeader 
+            trackCount={results.length} 
+            onSyncAll={handleSyncAll} 
+            syncAllLoading={syncAllLoading} 
+            sunoCookie={sunoCookie} 
+          />
+      )}
+
+{results.map((data, index) => {
+          const status = syncStatuses[index] || { loading: false, success: false, error: undefined };
+          return (
+            <TrackCard 
+                key={index}
+                data={data}
+                index={index}
+                totalTracks={results.length}
+                status={status}
+                sunoCookie={sunoCookie}
+                onSync={() => handleSyncTrack(data, index)}
+                onEdit={() => setEditingIndex(index)}
+            />
+          );
+      })}
+
+{/* Edit Modal */}
+      {editingIndex !== null && results[editingIndex] && (
+          <EditSongModal
+            isOpen={true}
+            onClose={() => setEditingIndex(null)}
+            onSave={handleSaveEdit}
+            initialData={results[editingIndex]}
+          />
+      )}
+
+{/* Fallback if parsing failed for all */}
+      {results.length === 1 && !results[0].style && !results[0].lyricsWithTags && results[0].fullResponse && (
+          <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl p-6">
+              <h3 className="text-red-400 mb-2 font-bold">Parsing Error</h3>
+              <pre className="whitespace-pre-wrap font-mono text-sm text-slate-300 break-words">{results[0].fullResponse}</pre>
+          </div>
+      )}
+    </div>
+  );
+};
+
+export default OutputSection;
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/OutputSection/TrackCard.tsx ---
+
+import React from 'react';
+import { ParsedSunoOutput } from '../../types';
+import CopyButton from '../CopyButton';
+
+interface TrackCardProps {
+  data: ParsedSunoOutput;
+  index: number;
+  totalTracks: number;
+  status: { loading: boolean, error?: string, success?: boolean };
+  sunoCookie?: string;
+  onSync: () => void;
+  onEdit: () => void;
+}
+
+const TrackCard: React.FC<TrackCardProps> = ({ data, index, totalTracks, status, sunoCookie, onSync, onEdit }) => {
+  const metaItemsCount = [data.title, data.style, data.excludeStyles, data.advancedParams].filter(Boolean).length;
+  const gridClass = metaItemsCount >= 4 
+    ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4" 
+    : metaItemsCount >= 3
+        ? "grid grid-cols-1 md:grid-cols-3 gap-4"
+        : "grid grid-cols-1 md:grid-cols-2 gap-4";
+
+return (
+    <div className="space-y-6 relative pb-12 border-b border-[var(--app-panel-border)] last:border-0 last:pb-0">
+        <div className="flex justify-between items-center mb-2">
+            <div className="flex items-center gap-2">
+                {totalTracks > 1 && (
+                    <span className="bg-[var(--app-panel)] text-slate-400 text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded border border-[var(--app-panel-border)]">Track {index + 1}</span>
+                )}
+                {status.success && <span className="text-xs text-green-400 font-bold">✓ Synced</span>}
+            </div>
+            <button 
+                onClick={onEdit}
+                className="text-xs text-slate-400 hover:text-white flex items-center gap-1 bg-[var(--app-panel)] hover:bg-[var(--app-panel)] px-2 py-1 rounded transition-colors"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                </svg>
+                Edit
+            </button>
+        </div>
+        
+        {/* Meta Data Grid */}
+        <div className={gridClass}>
+            {data.title && (
+                <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl overflow-hidden shadow-lg flex flex-col">
+                    <div className="bg-[var(--app-panel)] px-4 py-3 border-b border-[var(--app-panel-border)] flex justify-between items-center shrink-0">
+                        <h3 className="text-sm font-semibold text-emerald-300 uppercase tracking-wider">Title</h3>
+                        <CopyButton text={data.title} label="Copy" />
+                    </div>
+                    <div className="p-4 bg-slate-900/30 flex-grow flex items-center justify-center">
+                        <p className="font-mono text-lg font-bold text-white text-center whitespace-pre-wrap break-words">{data.title}</p>
+                    </div>
+                </div>
+            )}
+            {data.style && (
+                <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl overflow-hidden shadow-lg flex flex-col">
+                    <div className="bg-[var(--app-panel)] px-4 py-3 border-b border-[var(--app-panel-border)] flex justify-between items-center shrink-0">
+                        <h3 className="text-sm font-semibold text-purple-300 uppercase tracking-wider">Style</h3>
+                        <CopyButton text={data.style} label="Copy" />
+                    </div>
+                    <div className="p-4 bg-slate-900/30 flex-grow">
+                        <pre className="whitespace-pre-wrap font-mono text-sm text-slate-300 w-full break-words">{data.style}</pre>
+                    </div>
+                </div>
+            )}
+            {data.excludeStyles && (
+                <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl overflow-hidden shadow-lg flex flex-col">
+                    <div className="bg-[var(--app-panel)] px-4 py-3 border-b border-[var(--app-panel-border)] flex justify-between items-center shrink-0">
+                        <h3 className="text-sm font-semibold text-red-300 uppercase tracking-wider">Negative</h3>
+                        <CopyButton text={data.excludeStyles} label="Copy" />
+                    </div>
+                    <div className="p-4 bg-slate-900/30 flex-grow">
+                        <pre className="whitespace-pre-wrap font-mono text-sm text-red-300/80 w-full break-words">{data.excludeStyles}</pre>
+                    </div>
+                </div>
+            )}
+            {data.advancedParams && (
+                <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl overflow-hidden shadow-lg flex flex-col">
+                    <div className="bg-[var(--app-panel)] px-4 py-3 border-b border-[var(--app-panel-border)] flex justify-between items-center shrink-0">
+                        <h3 className="text-sm font-semibold text-blue-300 uppercase tracking-wider">Parameters</h3>
+                        <CopyButton text={data.advancedParams} label="Copy" />
+                    </div>
+                    <div className="p-4 bg-slate-900/30 flex-grow">
+                        <pre className="whitespace-pre-wrap font-mono text-sm text-blue-300/80 w-full break-words">{data.advancedParams}</pre>
+                    </div>
+                </div>
+            )}
+        </div>
+
+{/* Lyrics Section */}
+        {data.lyricsWithTags && (
+            <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl overflow-hidden shadow-lg">
+                <div className="bg-[var(--app-panel)] px-4 py-3 border-b border-[var(--app-panel-border)] flex justify-between items-center">
+                    <h3 className="text-sm font-semibold text-pink-300 uppercase tracking-wider">Lyrics</h3>
+                    <div className="flex items-center gap-2">
+                        {sunoCookie && (
+                            <button
+                                onClick={onSync}
+                                disabled={status.loading}
+                                title={status.success ? "Sync again (creates new generation)" : "Sync to Suno"}
+                                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 border flex items-center space-x-2
+                                ${status.loading 
+                                    ? 'bg-pink-600/50 border-pink-500/50 text-white cursor-wait' 
+                                    : status.success
+                                        ? 'bg-green-600/20 border-green-500/30 text-green-400 hover:bg-green-600/30 hover:border-green-500/50 hover:text-green-300'
+                                        : 'bg-pink-700/80 border-pink-600 text-pink-100 hover:bg-pink-600'}`}
+                            >
+                                {status.loading ? (
+                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                ) : status.success ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                                        <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                    </svg>
+                                ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                        <polyline points="17 8 12 3 7 8" />
+                                        <line x1="12" y1="3" x2="12" y2="15" />
+                                    </svg>
+                                )}
+                                <span>{status.loading ? 'Syncing...' : status.success ? 'Synced' : 'Sync to Suno'}</span>
+                            </button>
+                        )}
+                        <CopyButton text={data.lyricsWithTags} label="Copy" />
+                    </div>
+                </div>
+                <div className="p-4 bg-slate-900/30">
+                    {status.error && (
+                        <div className="mb-4 p-2 bg-red-500/20 text-red-300 text-xs rounded border border-red-500/30">
+                            <strong>Sync Error:</strong> {status.error}
+                        </div>
+                    )}
+                    <div className="max-h-[400px] overflow-y-auto custom-scrollbar">
+                        <pre className="whitespace-pre-wrap font-mono text-sm text-slate-300 leading-relaxed break-words">{data.lyricsWithTags}</pre>
+                    </div>
+                </div>
+            </div>
+        )}
+    </div>
+  );
+};
+
+export default TrackCard;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/CopyButton.tsx ---
+import React, { useState } from 'react';
+
+interface CopyButtonProps {
+  text: string;
+  label?: string;
+}
+
+const CopyButton: React.FC<CopyButtonProps> = ({ text, label = 'Copy' }) => {
+  const [copied, setCopied] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+const fallbackCopy = (value: string): boolean => {
+    try {
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textarea);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
+
+const handleCopy = async () => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ok = fallbackCopy(text);
+        if (!ok) throw new Error('Clipboard API unavailable');
+      }
+      setCopied(true);
+      setFailed(false);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      const ok = fallbackCopy(text);
+      if (ok) {
+        setCopied(true);
+        setFailed(false);
+        setTimeout(() => setCopied(false), 2000);
+        return;
+      }
+      console.error('Failed to copy!', err);
+      setFailed(true);
+      setTimeout(() => setFailed(false), 2500);
+    }
+  };
+
+return (
+    <button
+      onClick={handleCopy}
+      type="button"
+      className={`
+        px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 border
+        flex items-center space-x-2
+        ${
+          copied
+            ? 'bg-green-500/20 border-green-500/50 text-green-400'
+            : failed
+            ? 'bg-red-500/20 border-red-500/50 text-red-300'
+            : 'bg-slate-700/50 border-slate-600 text-slate-300 hover:bg-[var(--app-tab-hover)] hover:text-white'
+        }
+      `}
+    >
+      {copied ? (
+        <>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+            <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+          </svg>
+          <span>Copied!</span>
+        </>
+      ) : failed ? (
+        <>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+            <path fillRule="evenodd" d="M18 10A8 8 0 114 4.58V4a1 1 0 10-2 0v4a1 1 0 001 1h4a1 1 0 100-2H5.34A6 6 0 1110 16a1 1 0 100 2 8 8 0 008-8z" clipRule="evenodd" />
+          </svg>
+          <span>Copy failed</span>
+        </>
+      ) : (
+        <>
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+            <path d="M7 3.5A1.5 1.5 0 018.5 2h3.879a1.5 1.5 0 011.06.44l3.122 3.12A1.5 1.5 0 0117 6.622V12.5a1.5 1.5 0 01-1.5 1.5h-1v-3.379a3 3 0 00-.879-2.121L10.5 5.379A3 3 0 008.379 4.5H7v-1z" />
+            <path d="M4.5 6A1.5 1.5 0 003 7.5v9A1.5 1.5 0 004.5 18h7a1.5 1.5 0 001.5-1.5v-5.879a1.5 1.5 0 00-.44-1.06L9.44 6.439A1.5 1.5 0 008.378 6H4.5z" />
+          </svg>
+          <span>{label}</span>
+        </>
+      )}
+    </button>
+  );
+};
+
+export default CopyButton;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/InputSection/TrackSelector.tsx ---
+import React from 'react';
+
+interface TrackSelectorProps {
+  numTracks: number;
+  maxTracks?: number;
+  onChange: (n: number) => void;
+}
+
+const TrackSelector: React.FC<TrackSelectorProps> = ({ numTracks, maxTracks = 7, onChange }) => {
+  return (
+    <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl p-4">
+        <div className="flex justify-between items-center mb-3">
+            <label className="text-sm font-medium text-slate-300">Tracks to Generate</label>
+            <span className="bg-[var(--app-accent)] text-white text-xs font-bold px-2 py-1 rounded-full">{numTracks} {numTracks === 1 ? 'Track' : 'Tracks'}</span>
+        </div>
+        <input 
+            type="range" 
+            min="1" 
+            max={maxTracks}
+            step="1" 
+            value={numTracks}
+            onChange={(e) => onChange(parseInt(e.target.value, 10))}
+            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-purple-500"
+        />
+        <div className="flex justify-between text-[10px] text-slate-500 mt-2 font-bold px-1">
+            <span>Single</span>
+            <span>{maxTracks <= 7 ? 'Mini Album (EP)' : 'Album Arc'}</span>
+            <span>{maxTracks >= 15 ? 'Extended Album' : maxTracks >= 10 ? 'Long Album' : 'Full Album'}</span>
+        </div>
+    </div>
+  );
+};
+
+export default TrackSelector;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/InputSection/FileUploader.tsx ---
+import React, { useRef } from 'react';
+import { FileContext } from '../../types';
+
+interface FileUploaderProps {
+  selectedFiles: FileContext[];
+  onFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onRemoveFile: (index: number) => void;
+  isLoading: boolean;
+}
+
+const FileUploader: React.FC<FileUploaderProps> = ({ selectedFiles, onFileChange, onRemoveFile, isLoading }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+return (
+    <div className="space-y-3">
+        <input 
+          type="file" 
+          ref={fileInputRef}
+          onChange={onFileChange}
+          accept="image/*,text/plain,application/pdf,audio/*"
+          multiple
+          className="hidden"
+        />
+        
+        <div className="flex flex-wrap gap-2">
+            {selectedFiles.map((file, idx) => {
+                const isAudio = file.mimeType.startsWith('audio/');
+                const isImage = file.mimeType.startsWith('image/');
+                
+                return (
+                    <div key={idx} className={`flex items-center gap-2 bg-slate-900 border ${isAudio ? 'border-pink-500/50' : 'border-[var(--app-panel-border)]'} rounded-lg p-2 animate-in fade-in zoom-in-95 duration-200`}>
+                        <div className={`${isAudio ? 'bg-pink-900/50' : 'bg-purple-900/50'} p-1.5 rounded-md`}>
+                            {isAudio ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-pink-300">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l.31-.088a2.25 2.25 0 001.632-2.163V6.553zM5.25 18.103V9.5a2.25 2.25 0 011.569-2.141l9.431-3.144a2.25 2.25 0 012.75 2.141v10.503a2.25 2.25 0 01-1.569 2.141l-9.431 3.144a2.25 2.25 0 01-2.75-2.141V18.103z" />
+                                </svg>
+                            ) : isImage ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                                  </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4 text-purple-300">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                </svg>
+                            )}
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-slate-500 uppercase leading-tight">
+                                {isAudio ? 'Style Reference' : 'Context'}
+                            </span>
+                            <span className="text-xs text-slate-300 truncate max-w-[120px]" title={file.name}>{file.name}</span>
+                        </div>
+                        <button 
+                          type="button" 
+                          onClick={() => onRemoveFile(idx)}
+                          className="text-slate-500 hover:text-red-400 p-1 rounded-full hover:bg-[var(--app-panel)] transition-colors"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-3.5 h-3.5">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+                );
+            })}
+            
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+              className="flex items-center gap-2 text-sm text-slate-400 hover:text-[var(--app-accent)] transition-colors px-3 py-2 rounded-lg bg-[var(--app-panel)] border border-[var(--app-panel-border)]/50 hover:border-purple-500/50"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+              </svg>
+              <span className="text-xs font-bold uppercase tracking-wide">Add Files</span>
+            </button>
+        </div>
+    </div>
+  );
+};
+
+export default FileUploader;
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/InputSection/InputSection.tsx ---
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { FileContext, AIProviderConfig, GenerationOptions, ReferenceSongInput, AlbumObjectivePreset } from '../../types';
+import FileUploader from './FileUploader';
+import TrackSelector from './TrackSelector';
+import ApiKeyModal from '../ApiKeyModal';
+import { ProviderSwitcher } from '../ProviderSwitcher';
+import { getMaxTracksForProvider } from '../../services/providers/providerFactory';
+import { extractSunoPlaylistId } from '../../services/sunoApi';
+
+interface InputSectionProps {
+  onGenerate: (prompt: string, files: FileContext[], numTracks: number, options?: GenerationOptions) => void;
+  isLoading: boolean;
+  apiKeyValid: boolean;
+  providerConfig?: AIProviderConfig;
+  onProviderConfigChange?: (config: AIProviderConfig) => void;
+  onOpenProviderSettings?: () => void;
+}
+
+const InputSection: React.FC<InputSectionProps> = ({
+  onGenerate,
+  isLoading,
+  apiKeyValid,
+  providerConfig,
+  onProviderConfigChange,
+  onOpenProviderSettings
+}) => {
+  const [prompt, setPrompt] = useState('');
+  const [numTracks, setNumTracks] = useState(1);
+  const [selectedFiles, setSelectedFiles] = useState<FileContext[]>([]);
+  const [referenceIdsInput, setReferenceIdsInput] = useState('');
+  const [referencePlaylistsInput, setReferencePlaylistsInput] = useState('');
+  const [objectivePreset, setObjectivePreset] = useState<AlbumObjectivePreset>('standard');
+  const [preserveMotifsInput, setPreserveMotifsInput] = useState('');
+  const [avoidMotifsInput, setAvoidMotifsInput] = useState('');
+  const [showKeyModal, setShowKeyModal] = useState(false);
+
+const maxTracks = useMemo(
+    () => getMaxTracksForProvider(providerConfig),
+    [providerConfig]
+  );
+
+const references = useMemo<ReferenceSongInput[]>(() => {
+    const tokens = referenceIdsInput
+      .split(/[\s,]+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
+
+const parsed: ReferenceSongInput[] = [];
+    tokens.forEach((token) => {
+      const match = token.match(
+        /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:[:@](\d{1,3}))?$/i
+      );
+      if (!match) return;
+      const [, id, weightRaw] = match;
+      const weight = weightRaw ? Math.min(100, Math.max(1, parseInt(weightRaw, 10))) : undefined;
+      parsed.push({ id, weight });
+    });
+
+return parsed;
+  }, [referenceIdsInput]);
+
+const preserveMotifs = useMemo(
+    () =>
+      preserveMotifsInput
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    [preserveMotifsInput]
+  );
+
+const avoidMotifs = useMemo(
+    () =>
+      avoidMotifsInput
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    [avoidMotifsInput]
+  );
+
+const referencePlaylistIds = useMemo(
+    () =>
+      referencePlaylistsInput
+        .split(/[\s,]+/)
+        .map((token) => extractSunoPlaylistId(token))
+        .filter((v): v is string => !!v),
+    [referencePlaylistsInput]
+  );
+
+useEffect(() => {
+    if (numTracks > maxTracks) {
+      setNumTracks(maxTracks);
+    }
+  }, [maxTracks, numTracks]);
+
+const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!apiKeyValid) {
+        if (onOpenProviderSettings) {
+          onOpenProviderSettings();
+          return;
+        }
+        setShowKeyModal(true);
+        return;
+    }
+
+if ((prompt.trim() || selectedFiles.length > 0 || references.length > 0 || referencePlaylistIds.length > 0)) {
+      const options: GenerationOptions = {
+        references,
+        referencePlaylistIds,
+        preserveMotifs,
+        avoidMotifs,
+        objectivePreset,
+      };
+      onGenerate(prompt, selectedFiles, Math.min(numTracks, maxTracks), options);
+    }
+  };
+
+const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files) {
+      (Array.from(files) as File[]).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          if (event.target?.result) {
+            setSelectedFiles(prev => [...prev, {
+              name: file.name,
+              mimeType: file.type,
+              data: event.target.result as string
+            }]);
+          }
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+  };
+
+const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
+const isButtonDisabled =
+    isLoading || (!prompt.trim() && selectedFiles.length === 0 && references.length === 0 && referencePlaylistIds.length === 0);
+
+return (
+    <>
+        <div className="bg-[var(--app-panel)] backdrop-blur-sm border border-[var(--app-panel-border)] rounded-2xl p-6 shadow-xl relative">
+        <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-4">
+            Describe Your Album
+        </h2>
+        <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+            <label htmlFor="prompt" className="block text-sm font-medium text-slate-400 mb-2">
+                Thematic Idea or Vibe
+            </label>
+            <textarea
+                id="prompt"
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                disabled={isLoading}
+                placeholder="E.g., A concept album about a city submerged under neon waves. Mix of synth-pop and heavy industrial."
+                className="w-full h-32 bg-slate-900 border border-[var(--app-panel-border)] rounded-xl p-4 text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-[var(--app-accent)]/50 focus:border-transparent outline-none transition-all resize-none text-base"
+            />
+            </div>
+
+<TrackSelector numTracks={numTracks} maxTracks={maxTracks} onChange={setNumTracks} />
+            {numTracks > maxTracks && (
+              <p className="text-xs text-yellow-300">
+                Current provider/model supports up to {maxTracks} tracks in one generation.
+              </p>
+            )}
+
+{providerConfig && onProviderConfigChange && onOpenProviderSettings && (
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-2">
+                    AI Provider
+                </label>
+                <ProviderSwitcher
+                  providerConfig={providerConfig}
+                  onConfigChange={onProviderConfigChange}
+                  onOpenSettings={onOpenProviderSettings}
+                />
+              </div>
+            )}
+
+<FileUploader 
+                selectedFiles={selectedFiles} 
+                onFileChange={handleFileChange} 
+                onRemoveFile={removeFile} 
+                isLoading={isLoading} 
+            />
+
+<div>
+              <label htmlFor="referenceSongIds" className="block text-sm font-medium text-slate-400 mb-2">
+                Reference Existing Suno Songs (optional, supports weighting)
+              </label>
+              <textarea
+                id="referenceSongIds"
+                value={referenceIdsInput}
+                onChange={(e) => setReferenceIdsInput(e.target.value)}
+                disabled={isLoading}
+                placeholder="UUID, UUID:70, UUID:30 (comma/space/newline separated)"
+                className="w-full h-24 bg-slate-900 border border-[var(--app-panel-border)] rounded-xl p-3 text-xs font-mono text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-[var(--app-accent)]/50 focus:border-transparent outline-none transition-all resize-none"
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                Format: <code>songId</code> or <code>songId:weight</code>. Weights are 1-100 and bias influence per reference.
+              </p>
+            </div>
+
+<div>
+              <label htmlFor="referencePlaylists" className="block text-sm font-medium text-slate-400 mb-2">
+                Reference Suno Playlists (optional)
+              </label>
+              <textarea
+                id="referencePlaylists"
+                value={referencePlaylistsInput}
+                onChange={(e) => setReferencePlaylistsInput(e.target.value)}
+                disabled={isLoading}
+                placeholder="Paste playlist URL(s) or playlist ID(s), comma/space/newline separated"
+                className="w-full h-20 bg-slate-900 border border-[var(--app-panel-border)] rounded-xl p-3 text-xs font-mono text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-[var(--app-accent)]/50 focus:border-transparent outline-none transition-all resize-none"
+              />
+            </div>
+
+<div className="grid grid-cols-1 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-400 mb-2">Album Objective</label>
+                <select
+                  value={objectivePreset}
+                  onChange={(e) => setObjectivePreset(e.target.value as AlbumObjectivePreset)}
+                  className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-xl p-3 text-sm text-slate-200 focus:ring-2 focus:ring-[var(--app-accent)]/50 focus:border-transparent outline-none"
+                >
+                  <option value="standard">Standard Album Generation</option>
+                  <option value="append">Append New Tracks to Referenced Album</option>
+                </select>
+                {objectivePreset === 'append' && (
+                  <p className="text-xs text-slate-500 mt-2">
+                    Generates exactly the selected number of new tracks as continuation material after your references.
+                  </p>
+                )}
+              </div>
+
+<div>
+                <label htmlFor="preserveMotifs" className="block text-sm font-medium text-slate-400 mb-2">
+                  Preserve Motifs (optional)
+                </label>
+                <input
+                  id="preserveMotifs"
+                  type="text"
+                  value={preserveMotifsInput}
+                  onChange={(e) => setPreserveMotifsInput(e.target.value)}
+                  disabled={isLoading}
+                  placeholder="e.g. neon coast, whispered pre-hook, 128 BPM pulse"
+                  className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-xl p-3 text-sm text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-[var(--app-accent)]/50 focus:border-transparent outline-none"
+                />
+              </div>
+
+<div>
+                <label htmlFor="avoidMotifs" className="block text-sm font-medium text-slate-400 mb-2">
+                  Avoid Motifs (optional)
+                </label>
+                <input
+                  id="avoidMotifs"
+                  type="text"
+                  value={avoidMotifsInput}
+                  onChange={(e) => setAvoidMotifsInput(e.target.value)}
+                  disabled={isLoading}
+                  placeholder="e.g. trap hi-hat rolls, choir stacks, guitar solos"
+                  className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-xl p-3 text-sm text-slate-200 placeholder-slate-600 focus:ring-2 focus:ring-[var(--app-accent)]/50 focus:border-transparent outline-none"
+                />
+              </div>
+            </div>
+
+<div className="relative group">
+                <button
+                type="submit"
+                disabled={isButtonDisabled}
+                className={`w-full py-4 rounded-xl font-bold text-lg shadow-lg transition-all duration-300 flex items-center justify-center space-x-2
+                    ${
+                    isButtonDisabled
+                        ? 'bg-slate-700 text-slate-500 cursor-not-allowed opacity-70'
+                        : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white hover:shadow-purple-500/25'
+                    }`}
+                >
+                {isLoading ? (
+                    <>
+                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>Constructing {numTracks > 1 ? `Album (${numTracks} Tracks)` : 'Prompt'}...</span>
+                    </>
+                ) : (
+                    <>
+                    <span>{numTracks > 1 ? `Generate Album (${numTracks} Tracks)` : 'Generate Prompt'}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                    </svg>
+                    </>
+                )}
+                </button>
+            </div>
+        </form>
+        </div>
+        
+        <ApiKeyModal isOpen={showKeyModal} onClose={() => setShowKeyModal(false)} />
+    </>
+  );
+};
+
+export default InputSection;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/AlbumsSection/AlbumsSection.tsx ---
+import React, { useEffect, useMemo, useState } from 'react';
+import { LibraryAlbum, SunoClip } from '../../types';
+import { listAlbums, reorderAlbumSongs } from '../../services/libraryService';
+import { AppButton, AppCard } from '../ui/AppPrimitives';
+
+interface AlbumsSectionProps {
+  history: SunoClip[];
+}
+
+const AlbumsSection: React.FC<AlbumsSectionProps> = ({ history }) => {
+  const [albums, setAlbums] = useState<LibraryAlbum[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedAlbumId, setSelectedAlbumId] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+
+const historyTitleById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const clip of history) {
+      const title = clip.title || clip.originalData?.title;
+      if (title) map.set(clip.id, title);
+    }
+    return map;
+  }, [history]);
+
+const loadAlbums = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await listAlbums();
+      setAlbums(data);
+      setSelectedAlbumId((prev) => {
+        if (!data.length) return null;
+        if (prev && data.some((a) => a.id === prev)) return prev;
+        return data[0].id;
+      });
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load albums');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+useEffect(() => {
+    loadAlbums();
+  }, []);
+
+const selectedAlbum = useMemo(
+    () => albums.find((a) => a.id === selectedAlbumId) || null,
+    [albums, selectedAlbumId]
+  );
+
+const moveTrack = async (fromIndex: number, toIndex: number) => {
+    if (!selectedAlbum) return;
+    if (toIndex < 0 || toIndex >= selectedAlbum.songs.length || fromIndex === toIndex) return;
+
+const previousSongs = selectedAlbum.songs;
+    const reordered = [...previousSongs];
+    const [moved] = reordered.splice(fromIndex, 1);
+    reordered.splice(toIndex, 0, moved);
+
+setAlbums((prev) =>
+      prev.map((album) =>
+        album.id === selectedAlbum.id
+          ? {
+              ...album,
+              songs: reordered.map((song, idx) => ({ ...song, sortOrder: idx })),
+            }
+          : album
+      )
+    );
+
+setSaving(true);
+    setError(null);
+    try {
+      await reorderAlbumSongs(selectedAlbum.id, reordered.map((song) => song.songId));
+    } catch (e: any) {
+      setAlbums((prev) =>
+        prev.map((album) =>
+          album.id === selectedAlbum.id
+            ? {
+                ...album,
+                songs: previousSongs,
+              }
+            : album
+        )
+      );
+      setError(e?.message || 'Failed to reorder tracks');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+if (loading) {
+    return (
+      <AppCard className="rounded-2xl border-[var(--app-panel-border)]/70 bg-slate-900/30 p-6 text-sm text-slate-300">
+        Loading library albums...
+      </AppCard>
+    );
+  }
+
+return (
+    <div className="max-w-7xl mx-auto space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div>
+        <h2 className="text-2xl font-bold text-white">Albums Library</h2>
+        <p className="text-sm text-slate-400 mt-1">
+          Browse all albums and reorder tracks with library-wide control.
+        </p>
+      </div>
+
+{error && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {error}
+        </div>
+      )}
+
+{albums.length === 0 ? (
+        <div className="text-center py-20 bg-[var(--app-panel)] rounded-xl border-2 border-dashed border-[var(--app-panel-border)]">
+          <p className="text-slate-400">No albums yet.</p>
+          <p className="text-xs text-slate-500 mt-1">Create albums from track details in Library, then manage them here.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <AppCard className="lg:col-span-4 rounded-2xl border-[var(--app-panel-border)]/70 p-3">
+            <div className="flex items-center justify-between px-2 py-1 mb-1">
+              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Albums</span>
+              <span className="text-xs text-slate-500">{albums.length}</span>
+            </div>
+            <div className="space-y-2 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
+              {albums.map((album) => (
+                <button
+                  key={album.id}
+                  onClick={() => setSelectedAlbumId(album.id)}
+                  className={`w-full text-left rounded-xl border px-3 py-3 transition-colors ${
+                    selectedAlbumId === album.id
+                      ? 'border-purple-500/60 bg-[var(--app-accent)]/10'
+                      : 'border-[var(--app-panel-border)]/70 bg-[var(--app-panel)]/40 hover:border-slate-600'
+                  }`}
+                >
+                  <div className="font-semibold text-white truncate">{album.name}</div>
+                  <div className="text-xs text-slate-400 mt-1">{album.songs.length} track{album.songs.length === 1 ? '' : 's'}</div>
+                </button>
+              ))}
+            </div>
+          </AppCard>
+
+<AppCard className="lg:col-span-8 rounded-2xl border-[var(--app-panel-border)]/70 p-4">
+            {!selectedAlbum ? (
+              <div className="text-sm text-slate-400">Select an album.</div>
+            ) : (
+              <>
+                <div className="flex items-start justify-between gap-4 border-b border-[var(--app-panel-border)]/70 pb-3 mb-3">
+                  <div>
+                    <h3 className="text-xl font-bold text-white">{selectedAlbum.name}</h3>
+                    {selectedAlbum.description && (
+                      <p className="text-sm text-slate-400 mt-1">{selectedAlbum.description}</p>
+                    )}
+                  </div>
+                  <AppButton
+                    onClick={loadAlbums}
+                    disabled={saving}
+                    className="text-xs rounded-md border-slate-600 px-2 py-1 text-slate-300 hover:bg-[var(--app-panel)] disabled:opacity-50"
+                  >
+                    Refresh
+                  </AppButton>
+                </div>
+
+{selectedAlbum.songs.length === 0 ? (
+                  <p className="text-sm text-slate-400">This album has no tracks.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {selectedAlbum.songs.map((song, index) => (
+                      <div
+                        key={`${selectedAlbum.id}:${song.songId}`}
+                        className="rounded-xl border border-[var(--app-panel-border)]/70 bg-[var(--app-panel)]/40 px-3 py-2 flex items-center justify-between gap-3"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-xs text-slate-500 font-semibold">#{index + 1}</div>
+                          <div className="text-sm font-medium text-white truncate">
+                            {song.title || historyTitleById.get(song.songId) || 'Untitled'}
+                          </div>
+                          <div className="text-[11px] text-slate-500 truncate">{song.songId}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <AppButton
+                            onClick={() => moveTrack(index, index - 1)}
+                            disabled={saving || index === 0}
+                            className="rounded-md border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-[var(--app-tab-hover)] disabled:opacity-40"
+                          >
+                            Up
+                          </AppButton>
+                          <AppButton
+                            onClick={() => moveTrack(index, index + 1)}
+                            disabled={saving || index === selectedAlbum.songs.length - 1}
+                            className="rounded-md border-slate-600 px-2 py-1 text-xs text-slate-200 hover:bg-[var(--app-tab-hover)] disabled:opacity-40"
+                          >
+                            Down
+                          </AppButton>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </AppCard>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default AlbumsSection;
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/utils/lyrics.ts ---
+import { AlignedWord } from '../types';
+import { Type, GoogleGenAI } from "@google/genai";
+
+export const STOP_WORDS = new Set(['the', 'and', 'a', 'to', 'of', 'in', 'it', 'is', 'that', 'you', 'he', 'she', 'was', 'for', 'on', 'are', 'as', 'with', 'his', 'they', 'at', 'be', 'this', 'have', 'from', 'or', 'one', 'had', 'by', 'word', 'but', 'not', 'what', 'all', 'were', 'we', 'when', 'your', 'can', 'said', 'there', 'use', 'an', 'each', 'which', 'she', 'do', 'how', 'their', 'if', 'will', 'up', 'other', 'about', 'out', 'many', 'then', 'them', 'these', 'so', 'some', 'her', 'would', 'make', 'like', 'him', 'into', 'time', 'has', 'look', 'two', 'more', 'write', 'go', 'see', 'number', 'no', 'way', 'could', 'people', 'my', 'than', 'first', 'water', 'been', 'call', 'who', 'oil', 'its', 'now', 'find']);
+
+export const stripMetaTags = (text: string): string => {
+    if (!text) return "";
+    // Regex to match [ ... ] and { ... } including newlines
+    return text
+        .replace(/\[[^\]]*\]/g, "")
+        .replace(/\{[^}]*\}/g, "")
+        .replace(/\n{3,}/g, "\n\n") // Normalize excessive newlines
+        .trim();
+};
+
+export const getCleanAlignedWords = (aligned: AlignedWord[]): AlignedWord[] => {
+    // 1. Stateful Strip of Square Brackets [] and Curly Braces {}
+    const stripped: AlignedWord[] = [];
+    let inSquare = false;
+    let inCurly = false;
+
+for (const w of aligned) {
+        let cleanedWord = "";
+        for (const char of w.word) {
+            if (char === '[') { inSquare = true; continue; }
+            if (char === ']') { inSquare = false; continue; }
+            if (char === '{') { inCurly = true; continue; }
+            if (char === '}') { inCurly = false; continue; }
+
+if (!inSquare && !inCurly) {
+                cleanedWord += char;
+            }
+        }
+        
+        const trimmed = cleanedWord.trim();
+        if (trimmed.length > 0) {
+            // Check for trailing opener (e.g. "days (") and split it
+            const splitMatch = trimmed.match(/^(.*?)(\s*)([\(\"\'\u201C\u2018\u00AB\<]+)$/);
+            if (splitMatch && splitMatch[1].trim().length > 0) {
+                const wordPart = splitMatch[1].trim();
+                const spacePart = splitMatch[2];
+                const openerPart = splitMatch[3];
+                
+                // Only split if there is space OR if the opener is unambiguous (brackets)
+                // We treat quotes as ambiguous - they stick to the word if no space (e.g. end")
+                const isAmbiguous = /^[\"\'\u201C\u2018]+$/.test(openerPart);
+                
+                if (isAmbiguous && spacePart.length === 0) {
+                     stripped.push({ ...w, word: trimmed });
+                } else {
+                    // Split duration: give most to word, last 0.1s to opener
+                    const splitTime = Math.max(w.start_s, w.end_s - 0.1);
+                    
+                    stripped.push({ ...w, word: wordPart, end_s: splitTime });
+                    stripped.push({ ...w, word: openerPart, start_s: splitTime });
+                }
+            } else {
+                stripped.push({ ...w, word: trimmed });
+            }
+        }
+    }
+
+if (stripped.length === 0) return [];
+
+// 2. Smart Merge of Punctuation & Split Contractions
+    const merged: AlignedWord[] = [];
+    
+    const isOpener = (s: string) => /^[\(\"\'\u201C\u2018\u00AB\<]+$/.test(s); 
+    const isCloser = (s: string) => /^[\)\"\'\u201D\u2019\u00BB\>\,\.\!\?\:\;]+$/.test(s);
+    const isSuffix = (s: string) => /^['’][a-z]+$/i.test(s);
+    const isContractionPart = (s: string) => /^(s|m|t|re|ve|ll|d)$/i.test(s);
+
+for (let i = 0; i < stripped.length; i++) {
+        let current = { ...stripped[i] };
+        
+        // A. Forward Merge (Openers)
+        if (isOpener(current.word) && i + 1 < stripped.length) {
+            const next = stripped[i+1];
+            // Increased threshold to 5.0s to ensure brackets always join the next word
+            if (next.start_s - current.end_s < 5.0) {
+                stripped[i+1] = {
+                    ...next,
+                    word: current.word + next.word,
+                    start_s: current.start_s
+                };
+                continue;
+            }
+        }
+
+// B. Backward Merge (Closers & Suffixes & Split Contractions)
+        if (merged.length > 0) {
+            const prev = merged[merged.length - 1];
+            const timeGap = current.start_s - prev.end_s;
+            
+            const standardMerge = (isCloser(current.word) || isSuffix(current.word));
+            const splitContractionMerge = /['’]$/.test(prev.word) && isContractionPart(current.word);
+
+if ((standardMerge || splitContractionMerge) && timeGap < 1.5) {
+                merged[merged.length - 1] = {
+                    ...prev,
+                    word: prev.word + current.word,
+                    end_s: current.end_s
+                };
+                continue;
+            }
+        }
+
+merged.push(current);
+    }
+
+return merged;
+};
+
+export const cleanStringForMatch = (s: string) => {
+    if (!s) return "";
+    try {
+        return s.toLowerCase().replace(/['’]/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+    } catch (e) {
+        return s.toLowerCase().replace(/['".,/#!$%^&*;:{}=\-_`~()]/g, "");
+    }
+};
+
+export const groupWordsByTiming = (aligned: AlignedWord[]): AlignedWord[][] => {
+    const cleanAligned = getCleanAlignedWords(aligned); 
+    if (cleanAligned.length === 0) return [];
+    const groups: AlignedWord[][] = [];
+    let currentLine: AlignedWord[] = [];
+    const GAP_THRESHOLD = 0.5;
+    const MAX_CHARS = 40; 
+    cleanAligned.forEach((word, idx) => {
+        if (idx === 0) { currentLine.push(word); return; }
+        const prevWord = cleanAligned[idx - 1];
+        const timeGap = word.start_s - prevWord.end_s;
+        const currentLen = currentLine.reduce((sum, w) => sum + w.word.length + 1, 0);
+        const isGapBig = timeGap > GAP_THRESHOLD;
+        const isLineLong = currentLen > MAX_CHARS;
+        const endsClause = /[.,;!?\)]$/.test(prevWord.word);
+        if (isGapBig || ((isLineLong || endsClause) && timeGap > 0.15)) {
+            groups.push(currentLine);
+            currentLine = [word];
+        } else {
+            currentLine.push(word);
+        }
+    });
+    if (currentLine.length > 0) groups.push(currentLine);
+    return groups;
+};
+
+export const matchWordsToPrompt = (aligned: AlignedWord[], promptText: string): AlignedWord[][] => {
+    const cleanAligned = getCleanAlignedWords(aligned);
+    if (cleanAligned.length === 0) return [];
+    const promptLines = stripMetaTags(promptText).split('\n').map(l => l.trim()).filter(l => l.length > 0);
+    if (promptLines.length === 0) return groupWordsByTiming(cleanAligned);
+    
+    type PromptToken = { text: string; lineIndex: number; isLineStart: boolean };
+    const tokens: PromptToken[] = [];
+    promptLines.forEach((line, idx) => {
+        const words = line.split(/\s+/).map(cleanStringForMatch).filter(w => w.length > 0);
+        words.forEach((w, wIdx) => tokens.push({ text: w, lineIndex: idx, isLineStart: wIdx === 0 }));
+    });
+    
+    const groups: AlignedWord[][] = [];
+    let currentGroup: AlignedWord[] = [];
+    let currentLineIndex = 0;
+    let tokenPtr = 0;
+    let wordsSinceLastMatch = 0; 
+    
+    for (let i = 0; i < cleanAligned.length; i++) {
+        const wordObj = cleanAligned[i];
+        const cleanWord = cleanStringForMatch(wordObj.word);
+        
+        if (!cleanWord) { 
+            // Punctuation Handling with Lookahead
+            // Check if this punctuation likely belongs to the NEXT line (e.g. leading quote)
+            const isAmbiguousOpener = /^['"“‘\(\[\{<]/.test(wordObj.word);
+            
+            if (isAmbiguousOpener && i + 1 < cleanAligned.length) {
+                const nextObj = cleanAligned[i+1];
+                const nextClean = cleanStringForMatch(nextObj.word);
+                
+                if (nextClean) {
+                     // Lookahead search to see if next word triggers a line break
+                     let nextLineIndex = -1;
+                     const searchLimit = 20; 
+                     for (let la = 0; la < searchLimit; la++) {
+                         if (tokenPtr + la >= tokens.length) break;
+                         const t = tokens[tokenPtr + la];
+                         if (t.text === nextClean) {
+                             nextLineIndex = t.lineIndex;
+                             break;
+                         }
+                     }
+                     
+                     if (nextLineIndex > currentLineIndex) {
+                         // Force switch for openers if next word is on a new line
+                         if (currentGroup.length > 0) groups.push(currentGroup);
+                         currentGroup = [];
+                         currentLineIndex = nextLineIndex;
+                     }
+                }
+            }
+
+currentGroup.push(wordObj); 
+            continue; 
+        }
+
+let bestMatchOffset = -1;
+        const isLost = wordsSinceLastMatch > 3; 
+        const searchLimit = isLost ? 500 : 50;
+
+for (let lookahead = 0; lookahead < searchLimit; lookahead++) {
+            if (tokenPtr + lookahead >= tokens.length) break;
+            const target = tokens[tokenPtr + lookahead];
+            
+            const isExact = target.text === cleanWord;
+            const isSub = !isExact && (target.text.includes(cleanWord) || cleanWord.includes(target.text));
+            const isMatch = isExact || (isLost && isSub);
+
+if (isMatch) {
+                let contextScore = 0;
+                
+                if (i + 1 < cleanAligned.length) {
+                    const nextAudio = cleanStringForMatch(cleanAligned[i+1].word);
+                    if (tokenPtr + lookahead + 1 < tokens.length) {
+                        const nextToken = tokens[tokenPtr + lookahead + 1].text;
+                        if (nextToken === nextAudio) contextScore += 2;
+                        else if (nextAudio && nextToken.includes(nextAudio)) contextScore += 1;
+                    }
+                    if (i + 2 < cleanAligned.length && tokenPtr + lookahead + 2 < tokens.length) {
+                         const nextNextAudio = cleanStringForMatch(cleanAligned[i+2].word);
+                         const nextNextToken = tokens[tokenPtr + lookahead + 2].text;
+                         if (nextNextAudio === nextNextToken) contextScore += 1;
+                    }
+                }
+
+const isStrongMatch = (isExact && lookahead === 0) || contextScore > 0;
+                
+                if (target.isLineStart && (isStrongMatch || (isExact && !STOP_WORDS.has(cleanWord)))) {
+                    bestMatchOffset = lookahead;
+                    break;
+                }
+
+if (isStrongMatch) {
+                    bestMatchOffset = lookahead;
+                    break;
+                }
+                
+                if (isLost && isExact && !STOP_WORDS.has(cleanWord)) {
+                     if (bestMatchOffset === -1) bestMatchOffset = lookahead;
+                }
+            }
+        }
+
+if (bestMatchOffset !== -1) {
+            const target = tokens[tokenPtr + bestMatchOffset];
+            
+            if (target.lineIndex > currentLineIndex) {
+                if (currentGroup.length > 0) groups.push(currentGroup);
+                currentGroup = [];
+                currentLineIndex = target.lineIndex;
+            }
+
+tokenPtr += bestMatchOffset + 1;
+            wordsSinceLastMatch = 0; 
+        } else {
+            wordsSinceLastMatch++;
+            
+            if (currentGroup.length > 0) {
+                const prev = currentGroup[currentGroup.length - 1];
+                if (wordObj.start_s - prev.end_s > 2.0) { 
+                     groups.push(currentGroup);
+                     currentGroup = [];
+                }
+            }
+        }
+        
+        currentGroup.push(wordObj);
+    }
+    
+    if (currentGroup.length > 0) groups.push(currentGroup);
+    return groups;
+};
+
+export const groupLyricsByLines = async (
+  lyrics: string,
+  aligned: AlignedWord[],
+  apiKey?: string,
+  modelName: string = "gemini-3-flash-preview",
+  fallback?: AlignedWord[][]
+): Promise<AlignedWord[][]> => {
+  const key = apiKey || process.env.API_KEY;
+  if (!key) return fallback || [];
+
+const ai = new GoogleGenAI({ apiKey: key });
+
+try {
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: `
+        Task: Group a list of synchronized words into arrays that represent lines of a song.
+        Use the LYRICS provided as the ground truth for line breaks.
+        
+        LYRICS:
+        ${lyrics}
+
+SYNCED WORDS (JSON):
+        ${JSON.stringify(aligned.map(w => ({ word: w.word, start: w.start_s, end: w.end_s })))}
+      `,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                word: { type: Type.STRING, description: "The word text" },
+                start: { type: Type.NUMBER, description: "Start time in seconds" },
+                end: { type: Type.NUMBER, description: "End time in seconds" }
+              },
+              required: ["word", "start", "end"]
+            }
+          }
+        }
+      }
+    });
+
+const data = JSON.parse(response.text || "[]");
+    return data.map((line: any[]) => line.map((item: any) => ({
+      word: item.word,
+      start_s: item.start,
+      end_s: item.end,
+      success: true,
+      p_align: 1.0
+    })));
+  } catch (error) {
+    console.error("Gemini Grouping Error:", error);
+    return fallback || [];
+  }
+};
+
+// --- FILE GENERATION UTILS ---
+
+export type ParsedLrcLine = {
+    lineNumber: number;
+    start_s: number;
+    text: string;
+    raw: string;
+};
+
+export type LrcParseResult = {
+    entries: ParsedLrcLine[];
+    invalidLineNumbers: number[];
+};
+
+export type LyricLineTimingIssue = {
+    lineIndex: number;
+    start_s: number;
+    end_s: number;
+    duration_s: number;
+    text: string;
+    severity: 'warning' | 'critical';
+};
+
+const parseLrcFraction = (fractionRaw: string | undefined): number => {
+    if (!fractionRaw) return 0;
+    const digits = fractionRaw.trim();
+    if (!digits) return 0;
+    if (digits.length === 1) return Number(digits) / 10;
+    if (digits.length === 2) return Number(digits) / 100;
+    return Number(digits.slice(0, 3)) / 1000;
+};
+
+export const parseLrc = (lrcContent: string): LrcParseResult => {
+    const entries: ParsedLrcLine[] = [];
+    const invalidLineNumbers: number[] = [];
+    if (!lrcContent.trim()) return { entries, invalidLineNumbers };
+
+const lines = lrcContent.split(/\r?\n/);
+    const tsRegex = /\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+
+lines.forEach((rawLine, idx) => {
+        const matches = [...rawLine.matchAll(tsRegex)];
+        const text = rawLine.replace(tsRegex, '').trim();
+        if (matches.length === 0) {
+            if (rawLine.trim()) invalidLineNumbers.push(idx + 1);
+            return;
+        }
+
+for (const match of matches) {
+            const minutes = Number(match[1]);
+            const seconds = Number(match[2]);
+            const fraction = parseLrcFraction(match[3]);
+            if (!Number.isFinite(minutes) || !Number.isFinite(seconds)) {
+                invalidLineNumbers.push(idx + 1);
+                continue;
+            }
+            entries.push({
+                lineNumber: idx + 1,
+                start_s: (minutes * 60) + seconds + fraction,
+                text,
+                raw: rawLine
+            });
+        }
+    });
+
+entries.sort((a, b) => a.start_s - b.start_s);
+    return { entries, invalidLineNumbers };
+};
+
+export const groupWordsByLrc = (aligned: AlignedWord[], lrcContent: string): AlignedWord[][] => {
+    const cleanAligned = getCleanAlignedWords(aligned);
+    const { entries } = parseLrc(lrcContent);
+    if (cleanAligned.length === 0 || entries.length === 0) return [];
+
+const groups: AlignedWord[][] = [];
+    let wordPtr = 0;
+
+for (let i = 0; i < entries.length; i++) {
+        const start = entries[i].start_s;
+        const nextStart = entries[i + 1]?.start_s ?? Number.POSITIVE_INFINITY;
+
+while (wordPtr < cleanAligned.length && cleanAligned[wordPtr].end_s <= start) {
+            wordPtr++;
+        }
+
+const group: AlignedWord[] = [];
+        let scanPtr = wordPtr;
+        while (scanPtr < cleanAligned.length && cleanAligned[scanPtr].start_s < nextStart) {
+            group.push(cleanAligned[scanPtr]);
+            scanPtr++;
+        }
+
+if (group.length > 0) {
+            groups.push(group);
+            wordPtr = scanPtr;
+        }
+    }
+
+return groups;
+};
+
+export const groupWordsByLrcWithText = (aligned: AlignedWord[], lrcContent: string): AlignedWord[][] => {
+    const cleanAligned = getCleanAlignedWords(aligned);
+    const { entries } = parseLrc(lrcContent);
+    if (entries.length === 0) return [];
+    if (cleanAligned.length === 0) return [];
+
+const baseGroups = groupWordsByLrc(cleanAligned, lrcContent);
+    const result: AlignedWord[][] = [];
+    const fallbackEnd = cleanAligned[cleanAligned.length - 1]?.end_s ?? 0;
+
+for (let i = 0; i < entries.length; i++) {
+        const entry = entries[i];
+        const base = baseGroups[i] || [];
+        const nextStart = entries[i + 1]?.start_s;
+
+if (!entry.text.trim()) {
+            if (base.length > 0) result.push(base);
+            continue;
+        }
+
+const tokens = entry.text.split(/\s+/).map(t => t.trim()).filter(Boolean);
+        if (tokens.length === 0) {
+            if (base.length > 0) result.push(base);
+            continue;
+        }
+
+const baseStart = base[0]?.start_s ?? entry.start_s;
+        const baseEnd = base[base.length - 1]?.end_s ?? nextStart ?? fallbackEnd;
+        const start_s = Math.max(0, Math.min(entry.start_s, baseStart));
+        const endCandidate = nextStart ?? baseEnd ?? (start_s + Math.max(1, tokens.length * 0.2));
+        const end_s = Math.max(start_s + 0.05, endCandidate);
+        const slice = Math.max(0.03, (end_s - start_s) / tokens.length);
+
+const syntheticLine: AlignedWord[] = tokens.map((token, idx) => {
+            const tokenStart = start_s + (slice * idx);
+            const tokenEnd = idx === tokens.length - 1 ? end_s : (start_s + (slice * (idx + 1)));
+            return {
+                word: token,
+                start_s: tokenStart,
+                end_s: Math.max(tokenStart + 0.02, tokenEnd),
+                success: true,
+                p_align: 1
+            };
+        });
+
+result.push(syntheticLine);
+    }
+
+return result;
+};
+
+export const detectLongLyricLines = (
+    lines: AlignedWord[][],
+    warningThresholdSec = 12,
+    criticalThresholdSec = 30
+): LyricLineTimingIssue[] => {
+    const issues: LyricLineTimingIssue[] = [];
+
+lines.forEach((line, idx) => {
+        if (!line.length) return;
+        const start_s = line[0].start_s;
+        const end_s = line[line.length - 1].end_s;
+        const duration_s = Math.max(0, end_s - start_s);
+        if (duration_s < warningThresholdSec) return;
+
+issues.push({
+            lineIndex: idx,
+            start_s,
+            end_s,
+            duration_s,
+            text: line.map(w => w.word).join(' ').trim(),
+            severity: duration_s >= criticalThresholdSec ? 'critical' : 'warning'
+        });
+    });
+
+return issues.sort((a, b) => b.duration_s - a.duration_s);
+};
+
+export const detectLongLrcGaps = (
+    lrcContent: string,
+    warningThresholdSec = 12,
+    criticalThresholdSec = 30
+): Array<{ fromLineNumber: number; toLineNumber: number; gap_s: number; severity: 'warning' | 'critical' }> => {
+    const { entries } = parseLrc(lrcContent);
+    const issues: Array<{ fromLineNumber: number; toLineNumber: number; gap_s: number; severity: 'warning' | 'critical' }> = [];
+
+for (let i = 0; i < entries.length - 1; i++) {
+        const gap_s = entries[i + 1].start_s - entries[i].start_s;
+        if (gap_s < warningThresholdSec) continue;
+        issues.push({
+            fromLineNumber: entries[i].lineNumber,
+            toLineNumber: entries[i + 1].lineNumber,
+            gap_s,
+            severity: gap_s >= criticalThresholdSec ? 'critical' : 'warning'
+        });
+    }
+
+return issues.sort((a, b) => b.gap_s - a.gap_s);
+};
+
+export const formatLrcTimestamp = (seconds: number) => {
+    const date = new Date(0);
+    date.setMilliseconds(seconds * 1000);
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const secs = String(date.getUTCSeconds()).padStart(2, '0');
+    const hundredths = String(Math.floor(date.getUTCMilliseconds() / 10)).padStart(2, '0');
+    return `[${minutes}:${secs}.${hundredths}]`;
+};
+
+export const formatSrtTimestamp = (seconds: number) => {
+    const date = new Date(0);
+    date.setMilliseconds(seconds * 1000);
+    const hours = String(date.getUTCHours()).padStart(2, '0');
+    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+    const secs = String(date.getUTCSeconds()).padStart(2, '0');
+    const milliseconds = String(date.getUTCMilliseconds()).padStart(3, '0');
+    return `${hours}:${minutes}:${secs},${milliseconds}`;
+};
+
+export const generateLrc = (lines: AlignedWord[][]): string => {
+    let lrcContent = '';
+    lines.forEach(line => {
+        if (line.length === 0) return;
+        const time = formatLrcTimestamp(line[0].start_s);
+        const lineText = line.map(w => w.word).join(' ');
+        lrcContent += `${time}${lineText}\n`;
+    });
+    return lrcContent;
+};
+
+export const generateSrt = (lines: AlignedWord[][]): string => {
+    let srtContent = '';
+    lines.forEach((line, index) => {
+        if (line.length === 0) return;
+        const startTime = formatSrtTimestamp(line[0].start_s);
+        const endTime = formatSrtTimestamp(line[line.length - 1].end_s);
+        const lineText = line.map(w => w.word).join(' ');
+        srtContent += `${index + 1}\n${startTime} --> ${endTime}\n${lineText}\n\n`;
+    });
+    return srtContent;
+};
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/utils/offlineRender.ts ---
+import QRCode from 'qrcode';
+import { Qt6Style } from '../types';
+import type { VisualizerFrameData } from './visualizer';
+import { saveVisualizerRender } from '../services/offlineDb';
+
+type RollConfig = {
+    enabled: boolean;
+    type: 'text' | 'qr';
+    text: string;
+    seconds: number;
+    previewEnabled?: boolean;
+    previewStartSeconds?: number;
+    previewDurationSeconds?: number;
+    previewShowTitle?: boolean;
+    showTitle?: boolean;
+    titleText?: string;
+    theme?: 'clean' | 'bold';
+};
+
+const getSerializableRenderSettings = (config: {
+    width: number;
+    height: number;
+    bitrate: number;
+    videoBitrate: number;
+    videoBitrateMode: 'constant' | 'variable';
+    fps: number;
+    title: string;
+    visualMode: 'cover' | 'qt6' | 'hybrid';
+    qt6Style: Qt6Style;
+    customVideo?: HTMLVideoElement | null;
+    customBgType?: 'image' | 'video';
+    outputAspectTarget?: 'landscape' | 'portrait';
+    preRoll?: RollConfig;
+    postRoll?: RollConfig;
+}) => {
+    const { customVideo, ...serializable } = config;
+    return {
+        ...serializable,
+        hasCustomVideo: !!customVideo
+    };
+};
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const loadImage = (src: string): Promise<HTMLImageElement> =>
+    new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error('Failed loading image for roll card.'));
+        img.src = src;
+    });
+
+const createQrImage = async (text: string): Promise<HTMLImageElement | null> => {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+    try {
+        const dataUrl = await QRCode.toDataURL(trimmed, {
+            errorCorrectionLevel: 'M',
+            margin: 1,
+            color: {
+                dark: '#ffffff',
+                light: '#00000000'
+            }
+        });
+        return await loadImage(dataUrl);
+    } catch {
+        return null;
+    }
+};
+
+const drawRollCard = (
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    roll: RollConfig,
+    title: string,
+    qrImage: HTMLImageElement | null
+) => {
+    ctx.save();
+    const isBold = roll.theme === 'bold';
+    ctx.fillStyle = isBold ? 'rgba(12, 10, 34, 0.78)' : 'rgba(3, 7, 18, 0.72)';
+    ctx.fillRect(0, 0, width, height);
+
+const pad = Math.max(24, Math.round(width * 0.06));
+    const panelWidth = Math.min(width - pad * 2, Math.round(width * 0.88));
+    const panelHeight = Math.min(height - pad * 2, Math.round(height * 0.7));
+    const panelX = (width - panelWidth) / 2;
+    const panelY = (height - panelHeight) / 2;
+
+ctx.fillStyle = isBold ? 'rgba(30, 27, 75, 0.86)' : 'rgba(15, 23, 42, 0.88)';
+    ctx.strokeStyle = isBold ? 'rgba(236, 72, 153, 0.55)' : 'rgba(148, 163, 184, 0.35)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(panelX, panelY, panelWidth, panelHeight, 18);
+    ctx.fill();
+    ctx.stroke();
+
+const heading = roll.previewEnabled ? 'Preview Intro' : 'Message Card';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = '#f8fafc';
+    ctx.font = `700 ${Math.max(22, Math.round(width * 0.035))}px Inter, Arial, sans-serif`;
+    ctx.fillText(heading, width / 2, panelY + Math.max(18, Math.round(panelHeight * 0.08)));
+
+const effectiveTitle = (roll.titleText || '').trim() || title.trim();
+    const shouldShowTitle = !!roll.showTitle || (!!roll.previewEnabled && !!roll.previewShowTitle);
+    if (shouldShowTitle && effectiveTitle) {
+        ctx.fillStyle = 'rgba(186, 230, 253, 0.92)';
+        ctx.font = `600 ${Math.max(18, Math.round(width * 0.026))}px Inter, Arial, sans-serif`;
+        ctx.fillText(effectiveTitle, width / 2, panelY + Math.max(56, Math.round(panelHeight * 0.22)));
+    }
+
+if (roll.type === 'qr' && qrImage) {
+        const qrSize = Math.min(panelWidth * 0.5, panelHeight * 0.5);
+        const qrX = width / 2 - qrSize / 2;
+        const qrY = panelY + panelHeight / 2 - qrSize / 2 + Math.max(16, Math.round(panelHeight * 0.06));
+        ctx.drawImage(qrImage, qrX, qrY, qrSize, qrSize);
+    } else {
+        const message = roll.text?.trim() || ' ';
+        const textY = panelY + panelHeight / 2;
+        ctx.fillStyle = '#e2e8f0';
+        ctx.font = `500 ${Math.max(20, Math.round(width * 0.024))}px Inter, Arial, sans-serif`;
+        ctx.textBaseline = 'middle';
+
+const maxWidth = panelWidth * 0.82;
+        const words = message.split(/\s+/).filter(Boolean);
+        const lines: string[] = [];
+        let current = '';
+
+for (const word of words) {
+            const next = current ? `${current} ${word}` : word;
+            if (ctx.measureText(next).width <= maxWidth) {
+                current = next;
+            } else {
+                if (current) lines.push(current);
+                current = word;
+            }
+        }
+        if (current) lines.push(current);
+
+const lineHeight = Math.max(28, Math.round(width * 0.032));
+        const totalHeight = lines.length * lineHeight;
+        let y = textY - totalHeight / 2 + lineHeight / 2;
+        for (const line of lines.slice(0, 6)) {
+            ctx.fillText(line, width / 2, y);
+            y += lineHeight;
+        }
+    }
+
+ctx.restore();
+};
+
+export const performOfflineRender = async (
+    audioSrc: string,
+    canvas: HTMLCanvasElement,
+    config: {
+        width: number;
+        height: number;
+        bitrate: number;
+        videoBitrate: number;
+        videoBitrateMode: 'constant' | 'variable';
+        fps: number;
+        title: string;
+        visualMode: 'cover' | 'qt6' | 'hybrid';
+        qt6Style: Qt6Style;
+        customVideo?: HTMLVideoElement | null;
+        customBgType?: 'image' | 'video';
+        outputAspectTarget?: 'landscape' | 'portrait';
+        preRoll?: RollConfig;
+        postRoll?: RollConfig;
+    },
+    onProgress: (progress: number) => void,
+    onRenderFrame: (ctx: CanvasRenderingContext2D, time: number, data: VisualizerFrameData) => void
+) => {
+    return new Promise<void>((resolve, reject) => {
+        onProgress(0);
+
+const audio = new Audio(audioSrc);
+        audio.crossOrigin = 'anonymous';
+
+let audioCtx: AudioContext | null = null;
+        let dest: MediaStreamAudioDestinationNode | null = null;
+        let sourceNode: MediaElementAudioSourceNode | null = null;
+
+const chunks: BlobPart[] = [];
+        let mediaRecorder: MediaRecorder | null = null;
+        let renderRAF: number | null = null;
+        let done = false;
+        const ctx = canvas.getContext('2d')!;
+
+const finish = (error?: Error) => {
+            if (done) return;
+            done = true;
+            if (renderRAF) {
+                cancelAnimationFrame(renderRAF);
+                renderRAF = null;
+            }
+            try {
+                audio.pause();
+            } catch {}
+            audio.src = '';
+
+if (sourceNode) {
+                try {
+                    sourceNode.disconnect();
+                } catch {}
+            }
+            if (dest) {
+                try {
+                    dest.disconnect();
+                } catch {}
+            }
+            if (audioCtx) {
+                audioCtx.close().catch(() => undefined);
+            }
+
+if (error) {
+                reject(error);
+                return;
+            }
+
+if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+        };
+
+audio.onloadedmetadata = async () => {
+            try {
+                audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+                dest = audioCtx.createMediaStreamDestination();
+                sourceNode = audioCtx.createMediaElementSource(audio);
+                sourceNode.connect(audioCtx.destination);
+                sourceNode.connect(dest);
+
+const canvasStream = canvas.captureStream(config.fps);
+                const audioTrack = dest.stream.getAudioTracks()[0];
+                if (audioTrack) {
+                    canvasStream.addTrack(audioTrack);
+                }
+
+try {
+                    mediaRecorder = new MediaRecorder(canvasStream, {
+                        mimeType: 'video/webm;codecs=vp9,opus',
+                        videoBitsPerSecond: config.videoBitrate,
+                        audioBitsPerSecond: config.bitrate
+                    });
+                } catch {
+                    mediaRecorder = new MediaRecorder(canvasStream, {
+                        mimeType: 'video/webm',
+                        videoBitsPerSecond: config.videoBitrate,
+                        audioBitsPerSecond: config.bitrate
+                    });
+                }
+
+mediaRecorder.ondataavailable = (e) => {
+                    if (e.data && e.data.size > 0) chunks.push(e.data);
+                };
+
+mediaRecorder.onstop = async () => {
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    try {
+                        const url = URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `${config.title || 'rendered'}.webm`;
+                        a.click();
+                        URL.revokeObjectURL(url);
+
+try {
+                            const id = `render_${Date.now()}`;
+                            await saveVisualizerRender({
+                                id,
+                                clipId: `clip_${Date.now()}`,
+                                clipTitle: config.title,
+                                createdAt: Date.now(),
+                                settings: getSerializableRenderSettings(config)
+                            });
+                        } catch (saveErr: any) {
+                            console.warn('Failed to save render to local history:', saveErr);
+                        }
+
+resolve();
+                    } catch (e: any) {
+                        if (e.name === 'QuotaExceededError') {
+                            reject(new Error('Storage quota exceeded. Please delete old renders from History.'));
+                        } else {
+                            reject(e);
+                        }
+                    }
+                };
+
+const songDuration = Number.isFinite(audio.duration) ? audio.duration : 0;
+                const preRollEnabled = !!config.preRoll?.enabled;
+                const postRollEnabled = !!config.postRoll?.enabled;
+                const preRollSeconds = preRollEnabled ? clamp(config.preRoll?.seconds || 0, 0, 15) : 0;
+                const postRollSeconds = postRollEnabled ? clamp(config.postRoll?.seconds || 0, 0, 15) : 0;
+
+const previewEnabled = preRollEnabled && !!config.preRoll?.previewEnabled;
+                const previewStartSeconds = previewEnabled
+                    ? clamp(config.preRoll?.previewStartSeconds || 0, 0, Math.max(0, songDuration - 0.05))
+                    : 0;
+                const previewDurationSeconds = previewEnabled
+                    ? clamp(config.preRoll?.previewDurationSeconds || 7, 0.25, 10)
+                    : 0;
+
+const totalDuration = preRollSeconds + songDuration + postRollSeconds;
+
+const preQrImage = config.preRoll?.type === 'qr' ? await createQrImage(config.preRoll.text) : null;
+                const postQrImage = config.postRoll?.type === 'qr' ? await createQrImage(config.postRoll.text) : null;
+
+let switchedToMainTrack = !previewEnabled;
+
+if (previewEnabled) {
+                    audio.currentTime = previewStartSeconds;
+                    await audio.play();
+                } else if (preRollSeconds <= 0) {
+                    audio.currentTime = 0;
+                    await audio.play();
+                } else {
+                    audio.pause();
+                }
+
+mediaRecorder.start();
+                const startMs = performance.now();
+
+const drawLoop = () => {
+                    if (done) return;
+
+const elapsed = (performance.now() - startMs) / 1000;
+                    const clampedElapsed = Math.min(elapsed, totalDuration);
+
+if (preRollSeconds > 0 && clampedElapsed < preRollSeconds) {
+                        if (previewEnabled) {
+                            const previewEnd = previewStartSeconds + previewDurationSeconds;
+                            if (audio.currentTime >= previewEnd || audio.ended) {
+                                audio.currentTime = previewStartSeconds;
+                                audio.play().catch(() => undefined);
+                            }
+                            onRenderFrame(ctx, audio.currentTime, new Uint8Array(0));
+                        } else {
+                            onRenderFrame(ctx, 0, new Uint8Array(0));
+                        }
+
+drawRollCard(
+                            ctx,
+                            config.width,
+                            config.height,
+                            config.preRoll || { enabled: false, type: 'text', text: '', seconds: 0 },
+                            config.title,
+                            preQrImage
+                        );
+                    } else if (clampedElapsed < preRollSeconds + songDuration) {
+                        if (!switchedToMainTrack) {
+                            switchedToMainTrack = true;
+                            audio.currentTime = 0;
+                            audio.play().catch(() => undefined);
+                        }
+
+const mainTime = clamp(clampedElapsed - preRollSeconds, 0, songDuration);
+                        onRenderFrame(ctx, mainTime, new Uint8Array(0));
+                    } else if (postRollSeconds > 0 && clampedElapsed < totalDuration) {
+                        onRenderFrame(ctx, songDuration, new Uint8Array(0));
+                        drawRollCard(
+                            ctx,
+                            config.width,
+                            config.height,
+                            config.postRoll || { enabled: false, type: 'text', text: '', seconds: 0 },
+                            config.title,
+                            postQrImage
+                        );
+                    }
+
+const pct = totalDuration > 0 ? (clampedElapsed / totalDuration) * 100 : 100;
+                    onProgress(pct);
+
+if (clampedElapsed >= totalDuration) {
+                        onProgress(100);
+                        finish();
+                        return;
+                    }
+
+renderRAF = requestAnimationFrame(drawLoop);
+                };
+
+drawLoop();
+            } catch (e: any) {
+                finish(e instanceof Error ? e : new Error(e?.message || 'Render setup failed.'));
+            }
+        };
+
+audio.onerror = () => {
+            finish(new Error('Failed to load audio for rendering.'));
+        };
+    });
+};
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/utils/apiKeyStorage.ts ---
+import { ProviderType } from '../types';
+
+const API_KEY_STORAGE_KEYS: Record<ProviderType, string> = {
+  gemini: 'gemini_api_key',
+  openrouter: 'openrouter_api_key',
+  openapi: 'openapi_api_key',
+};
+
+export type ApiKeyStorageMode = 'client' | 'server' | 'both';
+
+const KEY_STORAGE_MODE_KEY = 'ai_provider_key_storage_modes';
+
+export function getApiKeyForProvider(providerType: ProviderType): string | undefined {
+  const storageKey = API_KEY_STORAGE_KEYS[providerType];
+  const stored = localStorage.getItem(storageKey);
+  return stored || undefined;
+}
+
+export function saveApiKeyForProvider(providerType: ProviderType, apiKey: string | undefined): void {
+  const storageKey = API_KEY_STORAGE_KEYS[providerType];
+  if (apiKey) {
+    localStorage.setItem(storageKey, apiKey);
+  } else {
+    localStorage.removeItem(storageKey);
+  }
+}
+
+export function getEnvApiKeyForProvider(providerType: ProviderType): string | undefined {
+  switch (providerType) {
+    case 'gemini':
+      return import.meta.env.VITE_GEMINI_API_KEY || undefined;
+    case 'openrouter':
+      return import.meta.env.VITE_OPENROUTER_API_KEY || undefined;
+    case 'openapi':
+      return import.meta.env.VITE_OPENAPI_API_KEY || undefined;
+    default:
+      return undefined;
+  }
+}
+
+export function getApiKey(providerType: ProviderType): string | undefined {
+  return getApiKeyForProvider(providerType) || getEnvApiKeyForProvider(providerType);
+}
+
+function parseStorageModes(raw: string | null): Partial<Record<ProviderType, ApiKeyStorageMode>> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Partial<Record<ProviderType, ApiKeyStorageMode>>;
+    return parsed || {};
+  } catch {
+    return {};
+  }
+}
+
+export function getApiKeyStorageMode(providerType: ProviderType): ApiKeyStorageMode {
+  const parsed = parseStorageModes(localStorage.getItem(KEY_STORAGE_MODE_KEY));
+  return parsed[providerType] || 'client';
+}
+
+export function setApiKeyStorageMode(providerType: ProviderType, mode: ApiKeyStorageMode): void {
+  const parsed = parseStorageModes(localStorage.getItem(KEY_STORAGE_MODE_KEY));
+  parsed[providerType] = mode;
+  localStorage.setItem(KEY_STORAGE_MODE_KEY, JSON.stringify(parsed));
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/utils/visualizer.ts ---
+
+import { AlignedWord, Qt6Style } from '../types';
+
+export const hexToRgba = (hex: string, alpha: number) => {
+    let c: any;
+    if(/^#([A-Fa-f0-9]{3}){1,2}$/.test(hex)){
+        c= hex.substring(1).split('');
+        if(c.length== 3) c= [c[0], c[0], c[1], c[1], c[2], c[2]];
+        c= '0x'+c.join('');
+        return 'rgba('+[(c>>16)&255, (c>>8)&255, c&255].join(',')+','+alpha+')';
+    }
+    return `rgba(255,255,255,${alpha})`;
+};
+
+export const formatTime = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return "0:00";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+};
+
+export const drawCover = (ctx: CanvasRenderingContext2D, img: CanvasImageSource | HTMLVideoElement | HTMLImageElement, w: number, h: number) => {
+    let imgW = 0; let imgH = 0;
+    if (img instanceof HTMLVideoElement) { imgW = img.videoWidth; imgH = img.videoHeight; } 
+    else if (img instanceof HTMLImageElement) { imgW = img.naturalWidth || img.width; imgH = img.naturalHeight || img.height; }
+    if (!imgW || !imgH) return;
+    const imgRatio = imgW / imgH; const winRatio = w / h;
+    let drawW, drawH, startX, startY;
+    if (imgRatio > winRatio) { drawH = h; drawW = h * imgRatio; startX = (w - drawW) / 2; startY = 0; } 
+    else { drawW = w; drawH = w / imgRatio; startX = 0; startY = (h - drawH) / 2; }
+    ctx.drawImage(img, startX, startY, drawW, drawH);
+};
+
+export const drawLogoWatermark = (
+    ctx: CanvasRenderingContext2D,
+    logo: CanvasImageSource | HTMLImageElement,
+    x: number,
+    y: number,
+    size: number,
+    opacity: number
+) => {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0.1, Math.min(1, opacity));
+    ctx.drawImage(logo, x, y, size, size);
+    ctx.restore();
+};
+
+const drawRadialBar = (ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, h: number, angle: number) => {
+    const x1 = cx + Math.cos(angle) * r;
+    const y1 = cy + Math.sin(angle) * r;
+    const x2 = cx + Math.cos(angle) * (r + h);
+    const y2 = cy + Math.sin(angle) * (r + h);
+    
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+};
+
+export const drawCornerPulseVisualizer = (
+    ctx: CanvasRenderingContext2D,
+    data: Uint8Array | Float32Array,
+    settings: {
+        activeColor: string;
+        qt6Sensitivity: number;
+        centerX: number;
+        centerY: number;
+        radius: number;
+    }
+) => {
+    const { activeColor, qt6Sensitivity, centerX, centerY, radius } = settings;
+    const bufferLength = data.length;
+    const usefulLimit = Math.floor(bufferLength * 0.5);
+    const totalBars = 56;
+    const halfBars = totalBars / 2;
+    const step = Math.max(1, Math.floor((usefulLimit - 2) / halfBars));
+    const maxExtrude = radius * 0.85;
+
+let bassSum = 0;
+    for(let k = 2; k < 16; k++) bassSum += (data[k] as number);
+    const bassEnergy = (bassSum / 14 / 255.0) * qt6Sensitivity;
+    const currentRadius = radius + (bassEnergy * 10);
+
+ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = activeColor;
+
+for(let i = 0; i < halfBars; i++) {
+        let sum = 0;
+        let count = 0;
+        for(let j = 0; j < step; j++) {
+            const idx = 2 + (i * step) + j;
+            if(idx < usefulLimit) {
+                sum += (data[idx] as number);
+                count++;
+            }
+        }
+        const avg = count > 0 ? (sum / count) : 0;
+        const val = (avg / 255.0) * qt6Sensitivity;
+        const barH = Math.max(2, Math.pow(val, 1.7) * maxExtrude);
+
+const angleStep = Math.PI / halfBars;
+        const angleOffset = i * angleStep;
+        drawRadialBar(ctx, centerX, centerY, currentRadius, barH, -Math.PI / 2 + angleOffset);
+        if (i > 0) drawRadialBar(ctx, centerX, centerY, currentRadius, barH, -Math.PI / 2 - angleOffset);
+    }
+
+ctx.beginPath();
+    ctx.arc(centerX, centerY, currentRadius - 4, 0, Math.PI * 2);
+    ctx.fillStyle = hexToRgba(activeColor, 0.12 + (bassEnergy * 0.18));
+    ctx.fill();
+    ctx.strokeStyle = hexToRgba(activeColor, 0.45);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+};
+
+export const drawLogoExpandingCircle = (
+    ctx: CanvasRenderingContext2D,
+    data: Uint8Array | Float32Array,
+    settings: {
+        activeColor: string;
+        sensitivity: number;
+        centerX: number;
+        centerY: number;
+        radius: number;
+    }
+) => {
+    const { activeColor, sensitivity, centerX, centerY, radius } = settings;
+    let bassSum = 0;
+    let bins = 0;
+    for (let i = 2; i < 24 && i < data.length; i++) {
+        bassSum += (data[i] as number);
+        bins++;
+    }
+    const bass = bins > 0 ? bassSum / bins : 0;
+    const energy = (bass / 255) * Math.max(0.3, sensitivity);
+    const pulse = radius * (0.25 + (energy * 0.7));
+
+ctx.save();
+    const halo = ctx.createRadialGradient(
+        centerX,
+        centerY,
+        Math.max(2, radius * 0.06),
+        centerX,
+        centerY,
+        radius + pulse
+    );
+    halo.addColorStop(0, hexToRgba(activeColor, 0.18 + (energy * 0.25)));
+    halo.addColorStop(1, hexToRgba(activeColor, 0));
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius + pulse, 0, Math.PI * 2);
+    ctx.fill();
+
+ctx.strokeStyle = hexToRgba(activeColor, 0.65);
+    ctx.lineWidth = Math.max(2, radius * 0.06);
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius + (energy * radius * 0.6), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+};

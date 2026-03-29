@@ -1,0 +1,2667 @@
+
+
+```ts
+# --- File: /home/tim/Suno-Architect/playwright.config.ts ---
+import { defineConfig, devices } from '@playwright/test';
+
+export default defineConfig({
+  testDir: './tests/e2e',
+  fullyParallel: true,
+  retries: 0,
+  reporter: 'list',
+  use: {
+    baseURL: 'http://127.0.0.1:4173',
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+  webServer: {
+    command: 'VITE_DISABLE_AUTH=true bun run dev --host 127.0.0.1 --port 4173',
+    url: 'http://127.0.0.1:4173',
+    reuseExistingServer: true,
+    timeout: 120_000,
+  },
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+  ],
+});
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/App.tsx ---
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import InputSection from './components/InputSection/InputSection';
+import OutputSection from './components/OutputSection/OutputSection';
+import { Header } from './components/Header';
+import { generateSunoPromptWithProvider } from './services/geminiService';
+import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, FileContext, AIProviderConfig, GenerationOptions, AppTheme, AppLayout } from './types';
+import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1, APP_THEMES, APP_LAYOUTS } from './constants';
+import Footer from './components/Footer';
+import { SettingsModal } from './components/SettingsModal';
+import { getSunoCredits, updateSunoMetadata, getSunoFeed, getSunoFeedOfflineAware, getSunoClip, getSunoPlaylist } from './services/sunoApi';
+import { downloadAccountCache } from './services/offlineSyncService';
+import HistorySection from './components/HistorySection/HistorySection';
+import ActivityHistorySection from './components/ActivityHistorySection/ActivityHistorySection';
+import VisualizerSection from './components/VisualizerSection/VisualizerSection';
+import AlbumsSection from './components/AlbumsSection/AlbumsSection';
+import AlbumBuilderSection from './components/AlbumBuilderSection/AlbumBuilderSection';
+import WebAudioMasterSection from './components/WebAudioMasterSection';
+import { stripMetaTags } from './utils/lyrics';
+import { validateProviderConfig, getDefaultModelForProvider, getMaxTracksForProvider } from './services/providers/providerFactory';
+import {
+  ApiKeyStorageMode,
+  getApiKeyForProvider,
+  getApiKeyStorageMode,
+  getEnvApiKeyForProvider,
+  saveApiKeyForProvider,
+  setApiKeyStorageMode,
+} from './utils/apiKeyStorage';
+import { deleteServerApiKey, getServerApiKey, setServerApiKey } from './services/keyVaultService';
+import { AUTH_BYPASS_ENABLED } from './services/authService';
+
+const VIEW_TABS: { key: ViewMode; label: string; icon?: React.ReactNode }[] = [
+  {
+    key: 'generator',
+    label: 'Generator',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M12 2v20" />
+        <path d="m17 5-5-3-5 3" />
+        <path d="m17 19-5 3-5-3" />
+        <path d="M2 12h20" />
+      </svg>
+    ),
+  },
+  {
+    key: 'activity-history',
+    label: 'History',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M3 3v5h5" />
+        <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+    ),
+  },
+  {
+    key: 'history',
+    label: 'Library',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M3 6a2 2 0 0 1 2-2h3v16H5a2 2 0 0 0-2 2z" />
+        <path d="M21 6a2 2 0 0 0-2-2h-3v16h3a2 2 0 0 1 2 2z" />
+        <path d="M8 4h8v16H8z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'albums',
+    label: 'Albums',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <rect x="3" y="4" width="18" height="16" rx="2" />
+        <circle cx="12" cy="12" r="3" />
+        <path d="M12 9v3l2 1" />
+      </svg>
+    ),
+  },
+  {
+    key: 'album-builder',
+    label: 'Album Builder',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M14 3h7v7" />
+        <path d="M10 14 21 3" />
+        <path d="M21 14v7h-7" />
+        <path d="M3 10V3h7" />
+        <path d="M3 21v-7h7" />
+      </svg>
+    ),
+  },
+  {
+    key: 'visualizer',
+    label: 'Visualizer',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M23 7l-7 5 7 5V7z" />
+        <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+      </svg>
+    ),
+  },
+  {
+    key: 'web-audio-master',
+    label: 'Web-Audio-Master',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M4 12h2" />
+        <path d="M8 8v8" />
+        <path d="M12 5v14" />
+        <path d="M16 8v8" />
+        <path d="M20 10v4" />
+      </svg>
+    ),
+  },
+];
+
+const LAST_VIEW_STORAGE_KEY = 'suno_last_view';
+const VIEW_QUERY_PARAM = 'view';
+
+const isViewMode = (value: string | null): value is ViewMode => {
+  if (!value) return false;
+  return VIEW_TABS.some((tab) => tab.key === value);
+};
+
+const getViewFromUrl = (): ViewMode | null => {
+  const params = new URLSearchParams(window.location.search);
+  const queryView = params.get(VIEW_QUERY_PARAM);
+  return isViewMode(queryView) ? queryView : null;
+};
+
+// Helper to map API response to SunoClip
+const mapSunoClip = (clip: any): SunoClip => {
+    const metadata = clip.metadata || {};
+    const tags = metadata.tags || '';
+    const prompt = metadata.prompt || '';
+    const title = clip.title || 'Untitled';
+
+const originalData: ParsedSunoOutput = {
+        style: tags,
+        title: title,
+        excludeStyles: metadata.negative_tags || '',
+        advancedParams: '',
+        vocalGender: '',
+        weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
+        styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
+        lyricsWithTags: prompt,
+        lyricsAlone: stripMetaTags(prompt),
+        fullResponse: ''
+    };
+
+return {
+        id: clip.id,
+        title: title,
+        created_at: clip.created_at,
+        model_name: clip.model_name || 'unknown',
+        imageUrl: clip.image_url,
+        imageLargeUrl: clip.image_large_url,
+        explicit: clip.explicit,
+        metadata: {
+            tags: tags,
+            prompt: prompt,
+            negative_tags: metadata.negative_tags,
+            duration: metadata.duration,
+            max_bpm: metadata.max_bpm,
+            min_bpm: metadata.min_bpm,
+            avg_bpm: metadata.avg_bpm,
+            key: metadata.key,
+        },
+        originalData: originalData
+    };
+};
+
+interface AppProps {
+  onSignOut?: () => void;
+}
+
+const App: React.FC<AppProps> = ({ onSignOut }) => {
+  const [state, setState] = useState<GenerationState>({
+    isLoading: false,
+    error: null,
+    result: null,
+  });
+
+const [view, setView] = useState<ViewMode>(() => {
+    const fromUrl = getViewFromUrl();
+    if (fromUrl) return fromUrl;
+    const saved = localStorage.getItem(LAST_VIEW_STORAGE_KEY);
+    return isViewMode(saved) ? saved : 'generator';
+  });
+  const [appTheme, setAppTheme] = useState<AppTheme>(() => {
+    const saved = localStorage.getItem('app_theme') as AppTheme | null;
+    return saved && APP_THEMES.some(theme => theme.id === saved) ? saved : 'midnight';
+  });
+  const [appLayout, setAppLayout] = useState<AppLayout>(() => {
+    const saved = localStorage.getItem('app_layout') as AppLayout | null;
+    return saved && APP_LAYOUTS.some(layout => layout.id === saved) ? saved : 'topbar';
+  });
+  
+  const [history, setHistory] = useState<SunoClip[]>(() => {
+    try {
+      const saved = localStorage.getItem('suno_history');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      console.error("Failed to parse history from local storage", e);
+      return [];
+    }
+  });
+  
+  const [isKeyValid, setIsKeyValid] = useState(false);
+  
+  const [providerConfig, setProviderConfig] = useState<AIProviderConfig>(() => {
+    try {
+      const saved = localStorage.getItem('ai_provider_config');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.type) {
+          const providerType = parsed.type as 'gemini' | 'openrouter' | 'openapi';
+          
+          if (parsed.baseUrl) {
+            parsed.baseUrl = parsed.baseUrl.replace(/\/+$/, '');
+          }
+          
+          return {
+            ...parsed,
+            apiKey: undefined,
+            model: parsed.model || getDefaultModelForProvider(providerType),
+          };
+        }
+      }
+    } catch (e) {
+      console.error("Failed to parse provider config from localStorage", e);
+    }
+    
+    return {
+      type: 'gemini',
+      apiKey: undefined,
+      model: getDefaultModelForProvider('gemini'),
+    };
+  });
+
+const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [keyStorageModes, setKeyStorageModes] = useState<Record<'gemini' | 'openrouter' | 'openapi', ApiKeyStorageMode>>(() => ({
+    gemini: getApiKeyStorageMode('gemini'),
+    openrouter: getApiKeyStorageMode('openrouter'),
+    openapi: getApiKeyStorageMode('openapi'),
+  }));
+
+const [geminiModel, setGeminiModel] = useState<string>(() => {
+      return localStorage.getItem('gemini_model') || providerConfig.model || 'gemini-3-flash-preview';
+  });
+
+const handleGeminiModelChange = (model: string) => {
+      setGeminiModel(model);
+      localStorage.setItem('gemini_model', model);
+      if (providerConfig.type === 'gemini') {
+        setProviderConfig({ ...providerConfig, model });
+      }
+  };
+  
+  const [sunoCookie, setSunoCookie] = useState('');
+  const [sunoModel, setSunoModel] = useState('chirp-bluejay');
+  const [sunoCredits, setSunoCredits] = useState<number | null>(null);
+  const [sunoConnectionState, setSunoConnectionState] = useState<'missing' | 'checking' | 'connected' | 'lost'>('missing');
+  const [isSyncingHistory, setIsSyncingHistory] = useState(false);
+  const [syncProgress, setSyncProgress] = useState('');
+  const [useCachedData, setUseCachedData] = useState(false);
+  const [isDownloadingOfflineCache, setIsDownloadingOfflineCache] = useState(false);
+  const [offlineProgress, setOfflineProgress] = useState('');
+
+const [promptSettings, setPromptSettings] = useState<PromptSettings>(() => {
+      try {
+          const saved = localStorage.getItem('suno_prompt_settings');
+          if (saved) return JSON.parse(saved);
+      } catch(e) {}
+      
+      const kb = buildKnowledgeBase(DEFAULT_SUNO_LIBRARY);
+      return {
+          version: 'v1',
+          customSystemPrompt: GET_PROMPT_V1(kb),
+          library: DEFAULT_SUNO_LIBRARY,
+          constraints: DEFAULT_LYRICAL_CONSTRAINTS
+      };
+  });
+
+const historyFetchedRef = useRef(false);
+  const verifyingSunoRef = useRef(false);
+
+const verifySunoConnection = useCallback(async (cookie: string, opts?: { silent?: boolean }) => {
+    const trimmed = (cookie || '').trim();
+    if (!trimmed) {
+      setSunoConnectionState('missing');
+      setSunoCredits(null);
+      return;
+    }
+    if (!opts?.silent) {
+      setSunoConnectionState('checking');
+    }
+    if (verifyingSunoRef.current) return;
+    verifyingSunoRef.current = true;
+    try {
+      const credits = await getSunoCredits(trimmed);
+      setSunoCredits(credits);
+      setSunoConnectionState('connected');
+    } catch (error) {
+      console.error('Suno connection check failed', error);
+      setSunoCredits(null);
+      setSunoConnectionState('lost');
+    } finally {
+      verifyingSunoRef.current = false;
+    }
+  }, []);
+
+useEffect(() => {
+    const savedCookie = localStorage.getItem('suno_cookie');
+    const savedModel = localStorage.getItem('suno_model');
+    const savedLocalLibraryMode = localStorage.getItem('local_library_mode');
+    
+    if (savedCookie) {
+      setSunoCookie(savedCookie);
+      verifySunoConnection(savedCookie);
+      
+      if (!historyFetchedRef.current) {
+          historyFetchedRef.current = true;
+          // Initial fetch with default limit
+          fetchAndMergeSunoHistory(savedCookie);
+      }
+    }
+    if (savedModel) {
+      setSunoModel(savedModel);
+    }
+    if (savedLocalLibraryMode) {
+      setUseCachedData(savedLocalLibraryMode === '1');
+    }
+  }, [verifySunoConnection]);
+
+useEffect(() => {
+    if (!sunoCookie?.trim()) {
+      setSunoConnectionState('missing');
+      return;
+    }
+    verifySunoConnection(sunoCookie, { silent: true });
+    const timer = window.setInterval(() => {
+      verifySunoConnection(sunoCookie, { silent: true });
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [sunoCookie, verifySunoConnection]);
+
+useEffect(() => {
+    localStorage.setItem('local_library_mode', useCachedData ? '1' : '0');
+    if (sunoCookie && historyFetchedRef.current) {
+        handleFetchHistory(50);
+    }
+  }, [useCachedData]);
+
+useEffect(() => {
+    localStorage.setItem('app_theme', appTheme);
+    const root = document.documentElement;
+    if (appTheme === 'midnight') {
+      root.removeAttribute('data-theme');
+    } else {
+      root.setAttribute('data-theme', appTheme);
+    }
+  }, [appTheme]);
+
+useEffect(() => {
+    localStorage.setItem('app_layout', appLayout);
+  }, [appLayout]);
+
+useEffect(() => {
+    localStorage.setItem(LAST_VIEW_STORAGE_KEY, view);
+
+const current = new URL(window.location.href);
+    if (view === 'generator') {
+      current.searchParams.delete(VIEW_QUERY_PARAM);
+    } else {
+      current.searchParams.set(VIEW_QUERY_PARAM, view);
+    }
+
+const nextUrl = `${current.pathname}${current.search}${current.hash}`;
+    const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (nextUrl !== currentUrl) {
+      window.history.replaceState(null, '', nextUrl);
+    }
+  }, [view]);
+
+useEffect(() => {
+    const handlePopState = () => {
+      const fromUrl = getViewFromUrl();
+      setView(fromUrl || 'generator');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+useEffect(() => {
+    localStorage.setItem('suno_history', JSON.stringify(history));
+  }, [history]);
+
+useEffect(() => {
+      localStorage.setItem('suno_prompt_settings', JSON.stringify(promptSettings));
+  }, [promptSettings]);
+
+useEffect(() => {
+      let cancelled = false;
+
+const loadProviderApiKey = async () => {
+        const providerType = providerConfig.type;
+        const storageMode = keyStorageModes[providerType] || 'client';
+        const localApiKey = getApiKeyForProvider(providerType);
+        const envApiKey = getEnvApiKeyForProvider(providerType);
+        let serverApiKey: string | undefined;
+
+if (storageMode === 'server' || storageMode === 'both') {
+          try {
+            serverApiKey = await getServerApiKey(providerType);
+          } catch (error) {
+            console.warn(`Failed to load server key for ${providerType}`, error);
+          }
+        }
+
+const resolvedApiKey =
+          storageMode === 'server'
+            ? serverApiKey || envApiKey
+            : storageMode === 'both'
+              ? serverApiKey || localApiKey || envApiKey
+              : localApiKey || envApiKey;
+
+if (!cancelled) {
+          setProviderConfig(prev => {
+            if (prev.type !== providerType || prev.apiKey === resolvedApiKey) return prev;
+            return { ...prev, apiKey: resolvedApiKey };
+          });
+        }
+      };
+
+loadProviderApiKey();
+
+return () => {
+        cancelled = true;
+      };
+  }, [providerConfig.type, keyStorageModes]);
+
+useEffect(() => {
+      const configToSave = {
+        ...providerConfig,
+        apiKey: undefined,
+      };
+      localStorage.setItem('ai_provider_config', JSON.stringify(configToSave));
+
+if (providerConfig.type === 'openapi') {
+        const openApiSettings = {
+          baseUrl: providerConfig.baseUrl,
+          authHeader: providerConfig.authHeader,
+          authPrefix: providerConfig.authPrefix,
+        };
+        localStorage.setItem('ai_provider_openapi_settings', JSON.stringify(openApiSettings));
+      }
+  }, [providerConfig]);
+
+useEffect(() => {
+      const isValid = validateProviderConfig(providerConfig);
+      setIsKeyValid(isValid);
+  }, [providerConfig]);
+
+const mergeClips = (newClips: SunoClip[]) => {
+      setHistory(prev => {
+        const nonDrafts = prev.filter(p => !p.id.startsWith('draft_'));
+        const map = new Map<string, SunoClip>(nonDrafts.map(c => [c.id, c]));
+
+newClips.forEach(newClip => {
+            if (map.has(newClip.id)) {
+                    const existing = map.get(newClip.id)!;
+                    const isRich = !!existing.originalData?.fullResponse;
+                    
+                    map.set(newClip.id, {
+                        ...newClip,
+                        originalData: isRich ? existing.originalData : newClip.originalData,
+                        metadata: isRich ? existing.metadata : newClip.metadata,
+                        alignmentData: existing.alignmentData || newClip.alignmentData,
+                        lrcContent: existing.lrcContent || newClip.lrcContent,
+                        srtContent: existing.srtContent || newClip.srtContent,
+                    });
+            } else {
+                map.set(newClip.id, newClip);
+            }
+        });
+
+const drafts = prev.filter(p => p.id.startsWith('draft_'));
+        const merged = Array.from(map.values());
+        return [...drafts, ...merged].sort((a, b) => 
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+    });
+  };
+
+const fetchAndMergeSunoHistory = async (cookie: string) => {
+    try {
+        const feedData = await getSunoFeedOfflineAware(cookie, 50, null, undefined, { useCachedData });
+        if (feedData && Array.isArray(feedData.clips)) {
+            const newClips = feedData.clips.map(mapSunoClip);
+            mergeClips(newClips);
+        }
+    } catch (e) {
+        console.error("Failed to fetch history feed", e);
+    }
+  };
+
+const handleFetchHistory = async (limit: number | 'all') => {
+    if (!sunoCookie) {
+         alert("Please connect your Suno account in Settings first.");
+         return;
+    }
+    
+    const fetchLimit: number | 'all' = limit;
+
+setIsSyncingHistory(true);
+    setSyncProgress('Fetching...');
+    
+    try {
+        const feedData = await getSunoFeedOfflineAware(sunoCookie, fetchLimit, null, undefined, { useCachedData });
+        
+        if (feedData && Array.isArray(feedData.clips)) {
+             const newClips = feedData.clips.map(mapSunoClip);
+             mergeClips(newClips);
+             setSyncProgress(`Updated ${newClips.length} items`);
+        }
+    } catch(e: any) {
+         if (e.message === "429") {
+             setSyncProgress(`Rate limited. Retrying...`);
+             await new Promise(r => setTimeout(r, 5000));
+             try {
+                const feedData = await getSunoFeedOfflineAware(sunoCookie, fetchLimit, null, undefined, { useCachedData });
+                if (feedData && Array.isArray(feedData.clips)) {
+                    const newClips = feedData.clips.map(mapSunoClip);
+                    mergeClips(newClips);
+                    setSyncProgress(`Updated ${newClips.length} items`);
+                }
+             } catch (retryErr) {
+                 console.error("Retry failed", retryErr);
+                 alert("Failed to sync history due to rate limits.");
+             }
+         } else {
+            console.error("Sync flow failed", e);
+            alert("Failed to sync history.");
+         }
+    } finally {
+        setIsSyncingHistory(false);
+        setTimeout(() => { if (!isSyncingHistory) setSyncProgress(''); }, 2000);
+    }
+  };
+
+const handleDownloadOfflineCache = async () => {
+    if (!sunoCookie) {
+      alert('Please connect your Suno account first.');
+      return;
+    }
+
+setIsDownloadingOfflineCache(true);
+    setOfflineProgress('Preparing sync…');
+
+try {
+      const result = await downloadAccountCache(sunoCookie, [], (progress) => {
+        setOfflineProgress(progress.message);
+      });
+      setUseCachedData(true);
+      setOfflineProgress(`Cached: +${result.added} new, ${result.updated} updated, ${result.unchanged} unchanged`);
+      await handleFetchHistory('all');
+    } catch (error: any) {
+      console.error('Local library cache sync failed', error);
+      setOfflineProgress('Local library sync failed.');
+    } finally {
+      setIsDownloadingOfflineCache(false);
+      setTimeout(() => setOfflineProgress(''), 3500);
+    }
+  };
+
+const handleSaveSunoConfig = (cookie: string, model: string, newSettings: PromptSettings) => {
+    setSunoCookie(cookie);
+    setSunoModel(model);
+    setPromptSettings(newSettings);
+
+if (cookie) {
+      localStorage.setItem('suno_cookie', cookie);
+      verifySunoConnection(cookie);
+      historyFetchedRef.current = true;
+      fetchAndMergeSunoHistory(cookie);
+    } else {
+      localStorage.removeItem('suno_cookie');
+      setSunoCredits(null);
+      setSunoConnectionState('missing');
+    }
+
+if (model) {
+       localStorage.setItem('suno_model', model);
+    }
+  };
+
+const handleModelChange = (model: string) => {
+      setSunoModel(model);
+      localStorage.setItem('suno_model', model);
+  };
+
+const handleSyncSuccess = async (response: any, originalData: ParsedSunoOutput) => {
+    if (sunoCookie) {
+        verifySunoConnection(sunoCookie, { silent: true });
+    }
+
+if (response && response.clips && Array.isArray(response.clips)) {
+        response.clips.forEach((clip: any) => {
+             updateSunoMetadata(clip.id, originalData, sunoCookie)
+                .then(() => console.log(`Metadata updated for ${clip.id}`))
+                .catch(err => console.error(`Metadata update failed for ${clip.id}`, err));
+        });
+
+const newClips: SunoClip[] = response.clips.map((clip: any) => ({
+            id: clip.id,
+            title: clip.title || 'Untitled',
+            created_at: clip.created_at,
+            model_name: clip.model_name,
+            imageUrl: clip.image_url,
+            imageLargeUrl: clip.image_large_url,
+            explicit: clip.explicit,
+            metadata: {
+                tags: clip.metadata?.tags || '',
+                prompt: clip.metadata?.prompt || '',
+                negative_tags: clip.metadata?.negative_tags,
+                duration: clip.metadata?.duration,
+                max_bpm: clip.metadata?.max_bpm,
+                min_bpm: clip.metadata?.min_bpm,
+                avg_bpm: clip.metadata?.avg_bpm,
+                key: clip.metadata?.key
+            },
+            originalData: originalData
+        }));
+        
+        setHistory(prevHistory => [...newClips, ...prevHistory]);
+    }
+  };
+
+const handleUpdateResult = (index: number, updatedTrack: ParsedSunoOutput) => {
+    setState(prev => {
+      if (!prev.result) return prev;
+      const newResult = [...prev.result];
+      newResult[index] = updatedTrack;
+      return { ...prev, result: newResult };
+    });
+  };
+
+const handleGenerate = async (
+    prompt: string,
+    files: FileContext[] = [],
+    numTracks: number = 1,
+    options: GenerationOptions = {}
+  ) => {
+    setState((prev) => ({ ...prev, isLoading: true, error: null, result: null }));
+    try {
+      const config: AIProviderConfig = {
+        ...providerConfig,
+        model: providerConfig.model || getDefaultModelForProvider(providerConfig.type),
+      };
+
+if (!validateProviderConfig(config)) {
+        throw new Error(`Invalid ${config.type} configuration. Please check your API key and settings.`);
+      }
+
+const maxTracks = getMaxTracksForProvider(config);
+      const safeNumTracks = Math.min(Math.max(1, numTracks), maxTracks);
+      if (numTracks > maxTracks) {
+        throw new Error(
+          `Selected model supports up to ${maxTracks} tracks in one request. Please lower track count or choose a higher-context OpenRouter model.`
+        );
+      }
+
+const referenceSongIds = options.references?.map((r) => r.id) || [];
+      const referencePlaylistIds = options.referencePlaylistIds || [];
+      let finalPrompt = prompt;
+      let validReferenceIds = Array.from(
+        new Set(
+          referenceSongIds.filter((id) =>
+            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+          )
+        )
+      );
+
+if (referenceSongIds.length > 0 && validReferenceIds.length === 0 && referencePlaylistIds.length === 0) {
+        throw new Error("No valid Suno IDs detected. Use UUID format for reference songs.");
+      }
+
+if (referencePlaylistIds.length > 0) {
+        const playlistResults = await Promise.allSettled(
+          referencePlaylistIds.map((playlistId) => getSunoPlaylist(playlistId, sunoCookie))
+        );
+
+const playlistSongIds = playlistResults
+          .flatMap((item) => {
+            if (item.status !== 'fulfilled') return [];
+            const clips = Array.isArray(item.value?.playlist_clips) ? item.value.playlist_clips : [];
+            return clips
+              .map((entry: any) => entry?.clip?.id)
+              .filter((id: any) => typeof id === 'string');
+          });
+
+validReferenceIds = Array.from(new Set([...validReferenceIds, ...playlistSongIds]));
+      }
+
+if (validReferenceIds.length > 0) {
+        if (!sunoCookie) {
+          throw new Error("Suno token required to import reference songs by ID. Connect Suno in Settings first.");
+        }
+
+const resolved = await Promise.allSettled(
+          validReferenceIds.map((id) => getSunoClip(id, sunoCookie))
+        );
+
+const references = resolved
+          .map((item, idx) => ({ item, id: validReferenceIds[idx] }))
+          .filter((x): x is { item: PromiseFulfilledResult<any>; id: string } => x.item.status === 'fulfilled')
+          .map(({ item, id }) => {
+            const clip = item.value || {};
+            const metadata = clip.metadata || {};
+            const lyrics = (metadata.prompt || '').slice(0, 2200);
+            const configuredWeight = options.references?.find((r) => r.id === id)?.weight;
+            return [
+              `Reference Song ID: ${id}`,
+              `Influence Weight: ${configuredWeight ?? 'auto'}`,
+              `Title: ${clip.title || 'Untitled'}`,
+              `Style/Tags: ${metadata.tags || 'N/A'}`,
+              `Negative Tags: ${metadata.negative_tags || 'N/A'}`,
+              `Lyrics/Prompt Source:`,
+              lyrics || 'N/A',
+            ].join('\n');
+          });
+
+if (references.length === 0) {
+          throw new Error("Failed to load reference songs from provided IDs.");
+        }
+
+const refBlock = [
+          "REFERENCE SONG CONTEXT (for style and continuity guidance only):",
+          "Do not copy lyrics verbatim. Preserve thematic continuity, progression, and stylistic DNA.",
+          options.objectivePreset === 'append'
+            ? `OBJECTIVE: Append exactly ${safeNumTracks} new tracks after the referenced material. Treat references as prior released tracks and continue their arc with fresh compositions.`
+            : "OBJECTIVE: Generate a cohesive set of tracks guided by references and user prompt.",
+          options.preserveMotifs && options.preserveMotifs.length > 0
+            ? `PRESERVE MOTIFS: ${options.preserveMotifs.join(', ')}`
+            : '',
+          options.avoidMotifs && options.avoidMotifs.length > 0
+            ? `AVOID MOTIFS: ${options.avoidMotifs.join(', ')}`
+            : '',
+          ...references.map((r, idx) => `--- REFERENCE ${idx + 1} ---\n${r}`),
+        ].filter(Boolean).join('\n\n');
+
+finalPrompt = [prompt, refBlock].filter(Boolean).join('\n\n');
+      }
+
+if (options.objectivePreset === 'append' && validReferenceIds.length === 0) {
+        throw new Error("Append mode requires at least one valid reference Suno ID.");
+      }
+
+if (validReferenceIds.length === 0) {
+        const directiveBlock = [
+          options.preserveMotifs && options.preserveMotifs.length > 0
+            ? `PRESERVE MOTIFS: ${options.preserveMotifs.join(', ')}`
+            : '',
+          options.avoidMotifs && options.avoidMotifs.length > 0
+            ? `AVOID MOTIFS: ${options.avoidMotifs.join(', ')}`
+            : '',
+        ].filter(Boolean).join('\n');
+
+if (directiveBlock) {
+          finalPrompt = [prompt, directiveBlock].filter(Boolean).join('\n\n');
+        }
+      }
+
+const results = await generateSunoPromptWithProvider(
+          finalPrompt, 
+          config, 
+          promptSettings.customSystemPrompt, 
+          files,
+          safeNumTracks
+      );
+      
+      setState({ isLoading: false, error: null, result: results });
+      
+      // Save all as drafts
+      const draftClips: SunoClip[] = results.map((result, idx) => ({
+          id: `draft_${Date.now()}_${idx}`,
+          title: result.title || `Untitled Track ${idx + 1}`,
+          created_at: new Date().toISOString(),
+          model_name: 'Gemini Draft',
+          metadata: {
+              tags: result.style || '',
+              prompt: result.lyricsWithTags || ''
+          },
+          originalData: result
+      }));
+      setHistory(prev => [...draftClips, ...prev]);
+
+} catch (err: any) {
+      setState({
+        isLoading: false,
+        error: err.message || "Something went wrong.",
+        result: null,
+      });
+    }
+  };
+
+const handleUpdateClip = useCallback((id: string, updates: Partial<SunoClip>) => {
+    setHistory(prev => {
+        const exists = prev.some(c => c.id === id);
+        if (!exists) return prev; 
+        return prev.map(clip => clip.id === id ? { ...clip, ...updates } : clip);
+    });
+  }, []);
+
+const handleAddClip = useCallback((clips: SunoClip | SunoClip[]) => {
+      const clipsArray = Array.isArray(clips) ? clips : [clips];
+      mergeClips(clipsArray);
+  }, []);
+
+const renderContent = () => {
+      switch(view) {
+          case 'activity-history':
+              return (
+                <ActivityHistorySection 
+                  history={history}
+                  setView={setView}
+                />
+              );
+          case 'history':
+              return (
+                <HistorySection
+                    history={history}
+                    onUpdateClip={handleUpdateClip}
+                    onAddClip={handleAddClip}
+                    sunoCookie={sunoCookie}
+                    onFetchHistory={handleFetchHistory}
+                    isSyncing={isSyncingHistory}
+                    syncProgress={syncProgress}
+                    onDownloadOfflineCache={handleDownloadOfflineCache}
+                    isDownloadingOfflineCache={isDownloadingOfflineCache}
+                    offlineProgress={offlineProgress}
+                    useCachedData={useCachedData}
+                    onToggleUseCachedData={setUseCachedData}
+                />
+              );
+          case 'visualizer':
+              return (
+                  <VisualizerSection 
+                    history={history}
+                    sunoCookie={sunoCookie}
+                    onUpdateClip={handleUpdateClip}
+                    providerConfig={providerConfig}
+                  />
+              );
+          case 'albums':
+              return <AlbumsSection history={history} />;
+          case 'album-builder':
+              return <AlbumBuilderSection history={history} />;
+          case 'web-audio-master':
+              return <WebAudioMasterSection />;
+          case 'generator':
+          default:
+              return (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                    <div className="lg:col-span-4 space-y-6">
+                        <div className="sticky top-24">
+                        <div className="mb-6">
+                            <h2 className="text-3xl font-bold text-white mb-2">Architect Your Album</h2>
+                            <p className="text-slate-400 text-sm leading-relaxed">
+                                Transform raw ideas into structured albums (up to {getMaxTracksForProvider(providerConfig)} tracks). 
+                                Generates cohesive prompts with production directives for Suno & Udio.
+                            </p>
+                        </div>
+                         <InputSection 
+                            onGenerate={handleGenerate} 
+                            isLoading={state.isLoading} 
+                            apiKeyValid={isKeyValid}
+                            providerConfig={providerConfig}
+                            onProviderConfigChange={setProviderConfig}
+                            onOpenProviderSettings={() => setIsSettingsModalOpen(true)}
+                        />
+                        {state.error && (
+                            <div className="mt-4 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-200 text-sm">
+                            <strong>Error:</strong> {state.error}
+                            </div>
+                        )}
+                        </div>
+                    </div>
+                    <div className="lg:col-span-8">
+                        {state.result ? (
+                        <OutputSection 
+                            results={state.result} 
+                            sunoCookie={sunoCookie}
+                            sunoModel={sunoModel}
+                            onSyncSuccess={handleSyncSuccess}
+                            onUpdateTrack={handleUpdateResult}
+                        />
+                        ) : (
+                        <div className="h-full flex flex-col items-center justify-center p-12 text-center border-2 border-dashed border-[var(--app-panel-border)] rounded-2xl bg-[var(--app-panel)] text-slate-600 min-h-[400px]">
+                            {!state.isLoading && (
+                            <>
+                                <div className="w-16 h-16 rounded-full bg-[var(--app-panel)] mb-4 flex items-center justify-center">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 opacity-50">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
+                                </svg>
+                                </div>
+                                <p className="text-lg font-medium">Ready to Generate</p>
+                                <p className="text-sm mt-1">Your structured album tracks will appear here.</p>
+                            </>
+                            )}
+                            {state.isLoading && (
+                            <div className="flex flex-col items-center animate-pulse">
+                                <div className="h-4 w-3/4 bg-[var(--app-panel)] rounded mb-3"></div>
+                                <div className="h-4 w-1/2 bg-[var(--app-panel)] rounded mb-3"></div>
+                                <div className="h-32 w-full bg-[var(--app-panel)] rounded"></div>
+                            </div>
+                            )}
+                        </div>
+                        )}
+                    </div>
+                </div>
+              );
+      }
+  };
+
+return (
+    <div className="theme-shell min-h-screen flex flex-col text-slate-200 font-sans selection:bg-[var(--app-accent)]/30">
+      
+      <Header 
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
+        onSignOut={onSignOut}
+        sunoCredits={sunoCredits}
+        providerConfig={providerConfig}
+        authBypassEnabled={AUTH_BYPASS_ENABLED}
+        sunoConnectionState={sunoConnectionState}
+      />
+
+<SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        appTheme={appTheme}
+        setAppTheme={setAppTheme}
+        appLayout={appLayout}
+        setAppLayout={setAppLayout}
+        providerConfig={providerConfig}
+        initialStorageMode={keyStorageModes[providerConfig.type] || 'client'}
+        onSaveProvider={async (config, storageMode) => {
+          const trimmedApiKey = config.apiKey?.trim() || undefined;
+          const providerType = config.type;
+
+if (storageMode === 'client' || storageMode === 'both') {
+            saveApiKeyForProvider(providerType, trimmedApiKey);
+          } else {
+            saveApiKeyForProvider(providerType, undefined);
+          }
+
+if (storageMode === 'server' || storageMode === 'both') {
+            if (trimmedApiKey) {
+              await setServerApiKey(providerType, trimmedApiKey);
+            } else {
+              await deleteServerApiKey(providerType);
+            }
+          } else {
+            await deleteServerApiKey(providerType).catch((err) => {
+              console.warn(`Failed clearing server key for ${providerType}`, err);
+            });
+          }
+
+setApiKeyStorageMode(providerType, storageMode);
+          setKeyStorageModes(prev => ({ ...prev, [providerType]: storageMode }));
+
+if (config.type === 'openapi') {
+            try {
+              const savedOpenApi = localStorage.getItem('ai_provider_openapi_settings');
+              if (savedOpenApi) {
+                const parsed = JSON.parse(savedOpenApi);
+                config = {
+                  ...config,
+                  baseUrl: config.baseUrl || parsed.baseUrl,
+                  authHeader: config.authHeader || parsed.authHeader,
+                  authPrefix: config.authPrefix !== undefined ? config.authPrefix : parsed.authPrefix,
+                };
+              }
+            } catch (e) {
+              console.warn("Failed to load saved OpenAPI settings", e);
+            }
+          }
+
+setProviderConfig({
+            ...config,
+            apiKey: trimmedApiKey,
+          });
+
+if (config.type === 'gemini' && config.model) {
+            setGeminiModel(config.model);
+          }
+        }}
+        sunoCookie={sunoCookie}
+        sunoModel={sunoModel}
+        promptSettings={promptSettings}
+        sunoCredits={sunoCredits}
+        onSaveSuno={handleSaveSunoConfig}
+      />
+
+{appLayout === 'topbar' && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 w-full">
+          <div className="rounded-2xl border p-3 sm:p-4 backdrop-blur-sm bg-[var(--app-panel)] border-[var(--app-panel-border)]">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-center">
+              <div className="flex flex-wrap items-center gap-2">
+                {VIEW_TABS.map((tab) => {
+                  const isActive = view === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      data-view-tab={tab.key}
+                      onClick={() => setView(tab.key)}
+                      className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+                        isActive ? 'text-white shadow-lg' : 'text-slate-300 hover:text-white'
+                      }`}
+                      style={{
+                        backgroundColor: isActive ? 'var(--app-tab-active)' : 'transparent',
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isActive) e.currentTarget.style.backgroundColor = 'var(--app-tab-hover)';
+                      }}
+                      onMouseLeave={(e) => {
+                        if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                      }}
+                    >
+                      {tab.icon}
+                      <span>{tab.label}</span>
+                      {tab.key === 'history' && history.length > 0 && (
+                        <span className="text-white text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--app-accent)' }}>
+                          {history.length}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+{appLayout === 'sidebar' && (
+        <div className="flex flex-1 overflow-hidden">
+          <aside className="w-64 flex-shrink-0 border-r flex flex-col bg-[var(--app-panel)] border-[var(--app-panel-border)]">
+            <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+              {VIEW_TABS.map((tab) => {
+                const isActive = view === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    data-view-tab={tab.key}
+                    onClick={() => setView(tab.key)}
+                    className={`w-full px-4 py-3 rounded-lg text-sm font-bold transition-all flex items-center gap-3 ${
+                      isActive ? 'text-white shadow-lg' : 'text-slate-300 hover:text-white'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--app-tab-active)' : 'transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) e.currentTarget.style.backgroundColor = 'var(--app-tab-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                  >
+                    {tab.icon}
+                    <span>{tab.label}</span>
+                    {tab.key === 'history' && history.length > 0 && (
+                      <span className="ml-auto text-white text-[10px] px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--app-accent)' }}>
+                        {history.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+          <main className="flex-1 overflow-auto p-8">
+            {renderContent()}
+          </main>
+        </div>
+      )}
+
+{appLayout === 'studio' && (
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="flex items-center justify-center px-6 py-3 border-b bg-[var(--app-panel)] border-[var(--app-panel-border)]">
+            <div className="flex items-center gap-1">
+              {VIEW_TABS.map((tab) => {
+                const isActive = view === tab.key;
+                return (
+                  <button
+                    key={tab.key}
+                    data-view-tab={tab.key}
+                    onClick={() => setView(tab.key)}
+                    className={`px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2 ${
+                      isActive ? 'text-white shadow-lg' : 'text-slate-300 hover:text-white'
+                    }`}
+                    style={{
+                      backgroundColor: isActive ? 'var(--app-tab-active)' : 'transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) e.currentTarget.style.backgroundColor = 'var(--app-tab-hover)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) e.currentTarget.style.backgroundColor = 'transparent';
+                    }}
+                    title={tab.label}
+                  >
+                    {tab.icon}
+                    <span className="hidden sm:inline">{tab.label}</span>
+                    {tab.key === 'history' && history.length > 0 && (
+                      <span className="text-white text-[10px] px-1.5 py-0.5 rounded-full" style={{ backgroundColor: 'var(--app-accent)' }}>
+                        {history.length}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <main className="flex-1 overflow-auto p-6">
+            {renderContent()}
+          </main>
+        </div>
+      )}
+
+{appLayout === 'topbar' && (
+        <main className="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
+          {renderContent()}
+        </main>
+      )}
+      <Footer
+        git="https://github.com/uaktags/Suno-Architect"
+        upstreamGit="https://github.com/xiliourt/Suno-Architect"
+      />
+    </div>
+  );
+};
+
+export default App;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/index.tsx ---
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import AuthGate from './components/AuthGate';
+import './globals.css';
+
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("Could not find root element to mount to");
+}
+
+const root = ReactDOM.createRoot(rootElement);
+root.render(
+  <React.StrictMode>
+    <AuthGate />
+  </React.StrictMode>
+);
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/offline-sw.js').catch((error) => {
+      console.warn('Service worker registration failed', error);
+    });
+  });
+}
+
+```
+
+```json
+# --- File: /home/tim/Suno-Architect/src/public/_routes.json ---
+{
+  "version": 1,
+  "include": [
+    "/api/*"
+  ],
+  "exclude": []
+}
+```
+
+```css
+# --- File: /home/tim/Suno-Architect/src/globals.css ---
+@import "tailwindcss";
+
+@theme {
+  --color-slate-900: #0f172a;
+  --color-slate-800: #1e293b;
+  --color-slate-600: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-200: #e2e8f0;
+}
+
+:root {
+  --app-bg-start: #1e293b;
+  --app-bg-mid: #0f172a;
+  --app-bg-end: #020617;
+  --app-panel: rgba(30, 41, 59, 0.55);
+  --app-panel-border: rgba(148, 163, 184, 0.22);
+  --app-tab-active: #334155;
+  --app-tab-hover: rgba(51, 65, 85, 0.55);
+  --app-accent: #a855f7;
+}
+
+:root[data-theme="neon-synth"] {
+  --app-bg-start: #1d1133;
+  --app-bg-mid: #120a24;
+  --app-bg-end: #07040f;
+  --app-panel: rgba(56, 26, 110, 0.45);
+  --app-panel-border: rgba(192, 132, 252, 0.32);
+  --app-tab-active: #4c1d95;
+  --app-tab-hover: rgba(76, 29, 149, 0.45);
+  --app-accent: #c084fc;
+}
+
+:root[data-theme="dawn-studio"] {
+  --app-bg-start: #172554;
+  --app-bg-mid: #0a192f;
+  --app-bg-end: #020617;
+  --app-panel: rgba(30, 58, 138, 0.42);
+  --app-panel-border: rgba(125, 211, 252, 0.3);
+  --app-tab-active: #1d4ed8;
+  --app-tab-hover: rgba(29, 78, 216, 0.4);
+  --app-accent: #38bdf8;
+}
+
+:root[data-theme="forest-night"] {
+  --app-bg-start: #0b2f22;
+  --app-bg-mid: #062018;
+  --app-bg-end: #020a08;
+  --app-panel: rgba(6, 78, 59, 0.42);
+  --app-panel-border: rgba(52, 211, 153, 0.3);
+  --app-tab-active: #065f46;
+  --app-tab-hover: rgba(6, 95, 70, 0.4);
+  --app-accent: #34d399;
+}
+
+/* Base Styles */
+@layer base {
+  body {
+    font-family: "Inter", sans-serif;
+    background-color: var(--color-slate-900);
+    color: var(--color-slate-200);
+  }
+}
+
+.theme-shell {
+  background-image: radial-gradient(
+    ellipse at top,
+    var(--app-bg-start),
+    var(--app-bg-mid),
+    var(--app-bg-end)
+  );
+}
+
+.ui-console-panel {
+  border: 2px solid var(--app-panel-border);
+  background: rgba(0, 0, 0, 0.9);
+  padding: 0.75rem;
+}
+
+.ui-console-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgb(103 232 249 / 0.9);
+}
+
+.ui-console-input {
+  width: 100%;
+  border: 1px solid var(--app-panel-border);
+  background: rgb(2 6 23);
+  color: rgb(226 232 240);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  padding: 0.65rem 0.75rem;
+  outline: none;
+}
+
+.ui-console-input::placeholder {
+  color: rgb(100 116 139);
+}
+
+.ui-console-input:focus {
+  box-shadow: 0 0 0 2px rgb(34 211 238 / 0.45);
+}
+
+.ui-console-button {
+  height: 2.5rem;
+  padding: 0 1rem;
+  border: 1px solid rgb(103 232 249 / 0.8);
+  color: rgb(207 250 254);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  transition: background-color 120ms ease, opacity 120ms ease;
+}
+
+.ui-console-button:hover:not(:disabled) {
+  background: rgb(34 211 238 / 0.08);
+}
+
+.ui-console-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Custom Scrollbar Styles */
+.custom-scrollbar::-webkit-scrollbar,
+textarea::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track,
+textarea::-webkit-scrollbar-track {
+  background: var(--color-slate-800);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb,
+textarea::-webkit-scrollbar-thumb {
+  background: var(--color-slate-600);
+  border-radius: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover,
+textarea::-webkit-scrollbar-thumb:hover {
+  background: var(--color-slate-500);
+}
+
+```
+
+```ts
+# --- File: /home/tim/Suno-Architect/src/types.ts ---
+
+export interface ParsedSunoOutput {
+  style: string;
+  title: string;
+  excludeStyles: string;
+  advancedParams: string;
+  vocalGender: string;
+  weirdness: number;
+  styleInfluence: number;
+  lyricsWithTags: string;
+  lyricsAlone: string;
+  fullResponse: string;
+}
+
+export interface GenerationState {
+  isLoading: boolean;
+  error: string | null;
+  result: ParsedSunoOutput[] | null;
+}
+
+export interface SunoClip {
+  id: string;
+  title: string;
+  created_at: string;
+  model_name: string;
+  imageUrl?: string;
+  imageLargeUrl?: string;
+  explicit?: boolean;
+  metadata: {
+    tags: string;
+    prompt: string;
+    negative_tags?: string;
+    duration?: number;
+    max_bpm?: number;
+    min_bpm?: number;
+    avg_bpm?: number;
+    key?: string;
+  };
+  originalData?: ParsedSunoOutput;
+  alignmentData?: AlignedWord[];
+  lrcContent?: string;
+  srtContent?: string;
+}
+
+export interface AlignedWord {
+  word: string;
+  start_s: number;
+  end_s: number;
+  success: boolean;
+  p_align: number;
+}
+
+export interface LyricAlignmentResponse {
+  aligned_words: AlignedWord[];
+}
+
+export interface SunoLibrary {
+  genres: string[];
+  structures: string[];
+  vocalStyles: string[];
+  production: string[];
+  theory: string[];
+}
+
+export interface LyricalConstraints {
+  forbidden: string[];
+  forbiddenAdjectives: string[];
+  forbiddenPhrases: string[];
+  forbiddenRhymes: string; // Keep as string for simple editing
+}
+
+export interface PromptSettings {
+  version: 'v1' | 'v2' | 'v3' | 'custom';
+  customSystemPrompt: string;
+  library: SunoLibrary;
+  constraints: LyricalConstraints;
+}
+
+export type AppTheme = 'midnight' | 'neon-synth' | 'dawn-studio' | 'forest-night';
+export type AppLayout = 'topbar' | 'sidebar' | 'studio';
+
+export interface FileContext {
+  mimeType: string;
+  data: string; // Base64 data URL
+  name: string;
+}
+
+export interface ReferenceSongInput {
+  id: string;
+  weight?: number;
+}
+
+export type AlbumObjectivePreset = 'standard' | 'append';
+
+export interface GenerationOptions {
+  references?: ReferenceSongInput[];
+  referencePlaylistIds?: string[];
+  preserveMotifs?: string[];
+  avoidMotifs?: string[];
+  objectivePreset?: AlbumObjectivePreset;
+}
+
+export type ViewMode = 'generator' | 'history' | 'activity-history' | 'albums' | 'album-builder' | 'visualizer' | 'web-audio-master';
+
+export type Qt6Style =
+  | 'wave'
+  | 'bars'
+  | 'circle'
+  | 'circular-wave'
+  | 'stereo-wave'
+  | 'stereo-bars'
+  | 'log-bars'
+  | 'led-bars'
+  | 'radial-spectrum'
+  | 'wave-spectrum'
+  | 'vu-meter'
+  | 'spectrogram'
+  | 'particle-pulse'
+  | 'organic-blob'
+  | 'multi-band-ring';
+
+export type ProviderType = 'gemini' | 'openrouter' | 'openapi';
+
+export interface AIProviderConfig {
+  type: ProviderType;
+  apiKey?: string;
+  baseUrl?: string;
+  model?: string;
+  headers?: Record<string, string>;
+  authHeader?: string;
+  authPrefix?: string;
+}
+
+export interface GenerateContentRequest {
+  model: string;
+  contents: string | unknown;
+  systemInstruction?: string;
+  temperature?: number;
+  responseMimeType?: string;
+  timeoutMs?: number;
+}
+
+export interface GenerateContentResponse {
+  text: string;
+}
+
+export interface AIProvider {
+  generateContent(request: GenerateContentRequest): Promise<GenerateContentResponse>;
+  validateConfig(): boolean;
+  getAvailableModels(): Promise<string[]>;
+}
+
+export interface AlbumSongRef {
+  songId: string;
+  title?: string | null;
+  addedAt: string;
+  sortOrder: number;
+}
+
+export interface LibraryAlbum {
+  id: number;
+  name: string;
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  songs: AlbumSongRef[];
+}
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/ActivityHistorySection/ActivityHistorySection.tsx ---
+import React, { useEffect, useMemo, useState } from 'react';
+import { SunoClip, ViewMode } from '../../types';
+import { listVisualizerRenders, deleteVisualizerRender, OfflineRenderHistory } from '../../services/offlineDb';
+
+interface ActivityHistorySectionProps {
+  history: SunoClip[];
+  setView: (view: ViewMode) => void;
+}
+
+const ActivityHistorySection: React.FC<ActivityHistorySectionProps> = ({ history, setView }) => {
+  const EXPANDED_STORAGE_KEY = 'activity_history_generation_expanded';
+  const [activeTab, setActiveTab] = useState<'generations' | 'visualizers'>('generations');
+  const [renders, setRenders] = useState<OfflineRenderHistory[]>([]);
+  const [isLoadingRenders, setIsLoadingRenders] = useState(false);
+  const [generationSort, setGenerationSort] = useState<'newest' | 'oldest' | 'title'>('newest');
+  const [showOnlyExpanded, setShowOnlyExpanded] = useState(false);
+  const [expandedGenerationIds, setExpandedGenerationIds] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem('activity_history_generation_expanded');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  });
+
+// Generations are drafts or specifically tagged models. For simplicity, any 'draft_' clip.
+  const generations = useMemo(
+    () => history.filter(c => c.id.startsWith('draft_') || c.model_name === 'Gemini Draft'),
+    [history]
+  );
+
+useEffect(() => {
+    if (activeTab === 'visualizers') {
+      loadRenders();
+    }
+  }, [activeTab]);
+
+useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_STORAGE_KEY, JSON.stringify(expandedGenerationIds));
+    } catch {
+      // no-op
+    }
+  }, [EXPANDED_STORAGE_KEY, expandedGenerationIds]);
+
+useEffect(() => {
+    if (generations.length === 0) return;
+    const validIds = new Set(generations.map((g) => g.id));
+    setExpandedGenerationIds((prev) => {
+      const next = Object.fromEntries(
+        Object.entries(prev).filter(([id, value]) => validIds.has(id) && !!value)
+      );
+      const sameKeys = Object.keys(next).length === Object.keys(prev).length;
+      return sameKeys ? prev : next;
+    });
+  }, [generations]);
+
+const loadRenders = async () => {
+    setIsLoadingRenders(true);
+    try {
+      const data = await listVisualizerRenders();
+      setRenders(data);
+    } catch (e) {
+      console.error('Failed to load renders', e);
+    } finally {
+      setIsLoadingRenders(false);
+    }
+  };
+
+const handleDeleteRender = async (id: string) => {
+    if (!window.confirm("Delete this rendered video?")) return;
+    try {
+      await deleteVisualizerRender(id);
+      setRenders(prev => prev.filter(r => r.id !== id));
+    } catch (e) {
+      console.error("Failed to delete render", e);
+    }
+  };
+
+const handleDownloadRender = (render: OfflineRenderHistory) => {
+    if (!render.mediaBlob) {
+      alert('This render history entry stores settings only (no video file). Reopen in Visualizer and render again to download.');
+      return;
+    }
+    const url = URL.createObjectURL(render.mediaBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${render.clipTitle || 'visualizer'}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+const handleReapplySettings = (render: OfflineRenderHistory) => {
+    // We would need a way to restore settings. 
+    // For now, we just route to visualizer. A full implementation would dispatch an event or use context.
+    setView('visualizer');
+    alert("In a full implementation, this would restore exact settings. Navigated to Visualizer.");
+  };
+
+const formatPercent = (value?: number) => (
+    typeof value === 'number' && Number.isFinite(value) ? `${value}%` : 'N/A'
+  );
+
+const toggleGenerationExpanded = (clipId: string) => {
+    setExpandedGenerationIds((prev) => ({
+      ...prev,
+      [clipId]: !prev[clipId],
+    }));
+  };
+
+const expandedGenerationCount = generations.filter((g) => !!expandedGenerationIds[g.id]).length;
+  const allGenerationsExpanded = generations.length > 0 && expandedGenerationCount === generations.length;
+
+const handleToggleAllGenerations = () => {
+    if (generations.length === 0) return;
+    setExpandedGenerationIds((prev) => {
+      if (!allGenerationsExpanded) {
+        const next = { ...prev };
+        generations.forEach((g) => {
+          next[g.id] = true;
+        });
+        return next;
+      }
+
+const next = { ...prev };
+      generations.forEach((g) => {
+        delete next[g.id];
+      });
+      return next;
+    });
+  };
+
+const visibleGenerations = useMemo(() => {
+    const base = showOnlyExpanded
+      ? generations.filter((g) => !!expandedGenerationIds[g.id])
+      : generations;
+
+const sorted = [...base];
+    sorted.sort((a, b) => {
+      if (generationSort === 'title') {
+        return (a.title || '').localeCompare(b.title || '');
+      }
+
+const aTime = new Date(a.created_at).getTime();
+      const bTime = new Date(b.created_at).getTime();
+      return generationSort === 'oldest' ? aTime - bTime : bTime - aTime;
+    });
+
+return sorted;
+  }, [expandedGenerationIds, generationSort, generations, showOnlyExpanded]);
+
+useEffect(() => {
+    if (showOnlyExpanded && expandedGenerationCount === 0) {
+      setShowOnlyExpanded(false);
+    }
+  }, [expandedGenerationCount, showOnlyExpanded]);
+
+return (
+    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div className="flex gap-2 border-b border-[var(--app-panel-border)] pb-4">
+        <button
+          onClick={() => setActiveTab('generations')}
+          className={`px-4 py-2 text-sm font-bold uppercase tracking-wider rounded-t border-b-2 transition-colors ${
+            activeTab === 'generations'
+              ? 'border-[var(--brand-accent)] text-white'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          Song Generations
+        </button>
+        <button
+          onClick={() => setActiveTab('visualizers')}
+          className={`px-4 py-2 text-sm font-bold uppercase tracking-wider rounded-t border-b-2 transition-colors ${
+            activeTab === 'visualizers'
+              ? 'border-[var(--brand-accent)] text-white'
+              : 'border-transparent text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          Visualizer Renders
+        </button>
+      </div>
+
+{activeTab === 'generations' && (
+        <div className="space-y-4">
+          {generations.length > 0 && (
+            <div className="flex flex-col gap-3 border border-[var(--app-panel-border)] bg-[var(--app-panel)] rounded-lg px-3 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-slate-400">
+                  {expandedGenerationCount} of {generations.length} expanded
+                  <span className="ml-2">
+                    ({visibleGenerations.length} visible)
+                  </span>
+                </p>
+                <button
+                  type="button"
+                  onClick={handleToggleAllGenerations}
+                  className="h-9 px-3 rounded-md border border-[var(--app-panel-border)] bg-black/20 hover:bg-[var(--app-tab-hover)] text-slate-200 text-[11px] font-bold uppercase tracking-widest transition-colors"
+                  aria-pressed={allGenerationsExpanded}
+                >
+                  {allGenerationsExpanded ? 'Collapse All' : 'Expand All'}
+                </button>
+              </div>
+
+<div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                <label className="flex items-center gap-2 text-xs text-slate-300">
+                  <input
+                    type="checkbox"
+                    checked={showOnlyExpanded}
+                    onChange={(e) => setShowOnlyExpanded(e.target.checked)}
+                    className="h-4 w-4 rounded border-[var(--app-panel-border)] bg-black/20"
+                  />
+                  Show only expanded
+                </label>
+
+<div className="sm:ml-auto flex items-center gap-2">
+                  <label htmlFor="generation-sort" className="text-xs text-slate-400">Sort</label>
+                  <select
+                    id="generation-sort"
+                    value={generationSort}
+                    onChange={(e) => setGenerationSort(e.target.value as 'newest' | 'oldest' | 'title')}
+                    className="h-9 rounded-md border border-[var(--app-panel-border)] bg-black/20 px-2 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-[var(--app-accent)]/50"
+                  >
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="title">Title (A-Z)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+
+{generations.length === 0 ? (
+            <div className="text-center py-20 bg-[var(--app-panel)] rounded-xl border-2 border-dashed border-[var(--app-panel-border)]">
+              <p className="text-slate-500 mb-2">No song generations found.</p>
+              <p className="text-xs text-slate-600">Generated drafts will appear here.</p>
+            </div>
+          ) : visibleGenerations.length === 0 ? (
+            <div className="text-center py-14 bg-[var(--app-panel)] rounded-xl border border-[var(--app-panel-border)]">
+              <p className="text-slate-400 mb-1">No expanded generations are currently visible.</p>
+              <p className="text-xs text-slate-500">Disable "Show only expanded" or expand some generation cards.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4">
+              {visibleGenerations.map((clip) => {
+                const isExpanded = !!expandedGenerationIds[clip.id];
+                return (
+                <div key={clip.id} className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] p-4 rounded-xl flex flex-col md:flex-row gap-4">
+                  <div className="flex-1">
+                    <h3 className="text-lg font-bold mb-1">{clip.title || 'Untitled Draft'}</h3>
+                    <p className="text-xs text-slate-400 mb-3 font-mono">{new Date(clip.created_at).toLocaleString()}</p>
+
+<div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-3">
+                      <div className="rounded border border-[var(--app-panel-border)] bg-black/20 px-2 py-2">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Model</p>
+                        <p className="text-xs text-slate-200 truncate" title={clip.model_name}>{clip.model_name || 'N/A'}</p>
+                      </div>
+                      <div className="rounded border border-[var(--app-panel-border)] bg-black/20 px-2 py-2">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Weirdness</p>
+                        <p className="text-xs text-slate-200">{formatPercent(clip.originalData?.weirdness)}</p>
+                      </div>
+                      <div className="rounded border border-[var(--app-panel-border)] bg-black/20 px-2 py-2">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Style Influence</p>
+                        <p className="text-xs text-slate-200">{formatPercent(clip.originalData?.styleInfluence)}</p>
+                      </div>
+                      <div className="rounded border border-[var(--app-panel-border)] bg-black/20 px-2 py-2">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Vocal</p>
+                        <p className="text-xs text-slate-200">{clip.originalData?.vocalGender || 'N/A'}</p>
+                      </div>
+                      <div className="rounded border border-[var(--app-panel-border)] bg-black/20 px-2 py-2 col-span-2 md:col-span-2">
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500">Style Prompt</p>
+                        <p className="text-xs text-slate-200 break-words">
+                          {clip.originalData?.style || clip.metadata?.tags || 'N/A'}
+                        </p>
+                      </div>
+                      {(clip.originalData?.excludeStyles || clip.metadata?.negative_tags) && (
+                        <div className="rounded border border-[var(--app-panel-border)] bg-black/20 px-2 py-2 col-span-2 md:col-span-3">
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500">Excluded Styles</p>
+                          <p className="text-xs text-slate-200 break-words">
+                            {clip.originalData?.excludeStyles || clip.metadata?.negative_tags}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+<div className="space-y-2">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Lyrics Prompt</p>
+                        <div className={`bg-black/30 p-3 rounded border border-slate-800 font-mono text-sm text-slate-300 whitespace-pre-wrap overflow-y-auto ${isExpanded ? 'max-h-[28rem]' : 'max-h-32'}`}>
+                          {clip.metadata?.prompt || clip.originalData?.lyricsWithTags || clip.originalData?.lyricsAlone || 'No prompt data.'}
+                        </div>
+                      </div>
+                      {(isExpanded && clip.originalData?.advancedParams) && (
+                        <div>
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500 mb-1">Advanced Params</p>
+                          <div className="bg-black/20 p-2 rounded border border-[var(--app-panel-border)] text-xs text-slate-300 whitespace-pre-wrap break-words">
+                            {clip.originalData.advancedParams}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="md:w-48 flex flex-col justify-end">
+                    <button
+                      onClick={() => toggleGenerationExpanded(clip.id)}
+                      className="w-full mb-2 py-2 border border-[var(--app-panel-border)] bg-[var(--app-panel)] hover:bg-[var(--app-tab-hover)] text-slate-200 text-[11px] font-bold uppercase tracking-widest transition-colors rounded"
+                      aria-expanded={isExpanded}
+                    >
+                      {isExpanded ? 'Collapse Details' : 'Expand Details'}
+                    </button>
+                    <button
+                      onClick={() => setView('generator')}
+                      className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold uppercase tracking-widest transition-colors rounded"
+                    >
+                      Open Generator
+                    </button>
+                  </div>
+                </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+{activeTab === 'visualizers' && (
+        <div className="space-y-4">
+          {isLoadingRenders ? (
+            <div className="text-center py-20 text-slate-500">Loading renders...</div>
+          ) : renders.length === 0 ? (
+            <div className="text-center py-20 bg-[var(--app-panel)] rounded-xl border-2 border-dashed border-[var(--app-panel-border)]">
+              <p className="text-slate-500 mb-2">No offline renders found.</p>
+              <p className="text-xs text-slate-600">Videos rendered from the Visualizer will appear here.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {renders.map(render => (
+                <div key={render.id} className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-xl overflow-hidden flex flex-col">
+                  <div className="p-4 bg-black/40 border-b border-[var(--app-panel-border)]">
+                    <h3 className="font-bold truncate" title={render.clipTitle}>{render.clipTitle}</h3>
+                    <p className="text-[10px] text-slate-400 font-mono mt-1">
+                      {new Date(render.createdAt).toLocaleString()}
+                      {typeof render.fileSize === 'number' ? ` • ${(render.fileSize / 1024 / 1024).toFixed(2)} MB` : ' • settings only'}
+                    </p>
+                  </div>
+                  
+                  {/* Basic Preview */}
+                  <div className="aspect-video bg-black flex items-center justify-center border-b border-[var(--app-panel-border)] relative group">
+                     {render.mediaBlob ? (
+                       <video src={URL.createObjectURL(render.mediaBlob)} controls className="w-full h-full object-contain" />
+                     ) : (
+                       <div className="px-4 text-center">
+                         <p className="text-sm text-slate-300">No video file stored</p>
+                         <p className="text-xs text-slate-500 mt-1">This entry keeps render settings only for replay/re-render.</p>
+                       </div>
+                     )}
+                  </div>
+
+<div className="p-3 grid grid-cols-2 gap-2 mt-auto">
+                    <button
+                      onClick={() => handleDownloadRender(render)}
+                      disabled={!render.mediaBlob}
+                      className="py-1.5 px-2 bg-emerald-900/30 hover:bg-emerald-800/50 text-emerald-400 border border-emerald-800/50 rounded text-xs font-bold uppercase tracking-wider transition-colors"
+                    >
+                      Download
+                    </button>
+                    <button
+                      onClick={() => handleReapplySettings(render)}
+                      className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded text-[10px] font-bold uppercase tracking-wider transition-colors"
+                    >
+                      Use Settings
+                    </button>
+                    <button
+                      onClick={() => handleDeleteRender(render.id)}
+                      className="py-1.5 px-2 col-span-2 bg-red-900/20 hover:bg-red-900/40 text-red-400 border border-red-900/30 rounded text-xs font-bold uppercase tracking-wider transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default ActivityHistorySection;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/ui/AppPrimitives.tsx ---
+import React from 'react';
+
+type ClassValue = string | false | null | undefined;
+
+export const cx = (...values: ClassValue[]) => values.filter(Boolean).join(' ');
+
+type UiTone = 'default' | 'console';
+
+interface CardProps extends React.HTMLAttributes<HTMLDivElement> {
+  tone?: UiTone;
+}
+
+export const AppCard: React.FC<CardProps> = ({ tone = 'default', className, ...props }) => (
+  <div
+    className={cx(
+      tone === 'console'
+        ? 'ui-console-panel'
+        : 'rounded-xl border border-[var(--app-panel-border)] bg-[var(--app-panel)] p-4',
+      className
+    )}
+    {...props}
+  />
+);
+
+interface FieldLabelProps extends React.LabelHTMLAttributes<HTMLLabelElement> {
+  tone?: UiTone;
+}
+
+export const AppFieldLabel: React.FC<FieldLabelProps> = ({ tone = 'default', className, ...props }) => (
+  <label
+    className={cx(
+      tone === 'console'
+        ? 'ui-console-label'
+        : 'block text-xs text-slate-400 mb-1',
+      className
+    )}
+    {...props}
+  />
+);
+
+type InputProps = React.InputHTMLAttributes<HTMLInputElement> & { tone?: UiTone };
+type SelectProps = React.SelectHTMLAttributes<HTMLSelectElement> & { tone?: UiTone };
+type TextareaProps = React.TextareaHTMLAttributes<HTMLTextAreaElement> & { tone?: UiTone };
+
+export const AppInput = React.forwardRef<HTMLInputElement, InputProps>(function AppInput(
+  { tone = 'default', className, ...props },
+  ref
+) {
+  return (
+    <input
+      ref={ref}
+      className={cx(
+        tone === 'console'
+          ? 'ui-console-input'
+          : 'w-full rounded-lg border border-[var(--app-panel-border)] bg-slate-900 text-sm text-white px-3 py-2 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/60',
+        className
+      )}
+      {...props}
+    />
+  );
+});
+
+export const AppSelect = React.forwardRef<HTMLSelectElement, SelectProps>(function AppSelect(
+  { tone = 'default', className, ...props },
+  ref
+) {
+  return (
+    <select
+      ref={ref}
+      className={cx(
+        tone === 'console'
+          ? 'ui-console-input'
+          : 'w-full rounded-lg border border-[var(--app-panel-border)] bg-slate-900 text-sm text-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/60',
+        className
+      )}
+      {...props}
+    />
+  );
+});
+
+export const AppTextarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(function AppTextarea(
+  { tone = 'default', className, ...props },
+  ref
+) {
+  return (
+    <textarea
+      ref={ref}
+      className={cx(
+        tone === 'console'
+          ? 'ui-console-input'
+          : 'w-full rounded-lg border border-[var(--app-panel-border)] bg-slate-900 text-sm text-white px-3 py-2 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/60',
+        className
+      )}
+      {...props}
+    />
+  );
+});
+
+type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'success' | 'warning' | 'console-primary' | 'console-secondary' | 'console-danger' | 'console-success';
+type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
+type ButtonIcon = 'none' | 'icon' | 'icon-circle';
+
+interface AppButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  tone?: UiTone;
+  variant?: ButtonVariant;
+  size?: ButtonSize;
+  icon?: ButtonIcon;
+}
+
+const sizeClasses: Record<ButtonSize, string> = {
+  xs: 'h-6 px-2 text-[10px]',
+  sm: 'h-8 px-3 text-xs',
+  md: 'h-10 px-4 text-sm',
+  lg: 'h-12 px-6 text-base',
+};
+
+const iconClasses: Record<ButtonIcon, string> = {
+  none: '',
+  icon: 'p-1.5',
+  'icon-circle': 'p-2 rounded-full',
+};
+
+const getDefaultStyles = (variant: ButtonVariant, tone: UiTone): string => {
+  if (tone === 'console') {
+    switch (variant) {
+      case 'console-primary':
+        return 'bg-cyan-700/80 border border-cyan-500/70 text-cyan-100 hover:bg-cyan-600/70';
+      case 'console-secondary':
+        return 'bg-transparent border border-cyan-500/50 text-cyan-200 hover:bg-cyan-900/40';
+      case 'console-danger':
+        return 'bg-red-900/60 border border-red-500/70 text-red-200 hover:bg-red-800/60';
+      case 'console-success':
+        return 'bg-emerald-900/60 border border-emerald-500/70 text-emerald-200 hover:bg-emerald-800/60';
+      default:
+        return 'ui-console-button';
+    }
+  }
+
+switch (variant) {
+    case 'primary':
+      return 'border border-[var(--app-accent)]/70 text-white bg-[var(--app-accent)]/15 hover:bg-[var(--app-accent)]/25';
+    case 'danger':
+      return 'border border-red-400/70 text-red-200 hover:bg-red-500/10';
+    case 'success':
+      return 'border border-emerald-400/70 text-emerald-200 hover:bg-emerald-500/10';
+    case 'warning':
+      return 'border border-amber-400/70 text-amber-200 hover:bg-amber-500/10';
+    default:
+      return 'border border-[var(--app-panel-border)] text-slate-200 hover:bg-[var(--app-tab-hover)]';
+  }
+};
+
+export const AppButton: React.FC<AppButtonProps> = ({
+  tone = 'default',
+  variant = 'secondary',
+  size = 'md',
+  icon = 'none',
+  className,
+  type = 'button',
+  ...props
+}) => {
+  const defaultStyles = getDefaultStyles(variant, tone);
+  const sizeStyles = icon === 'none' ? sizeClasses[size] : '';
+  const iconStyles = iconClasses[icon];
+
+return (
+    <button
+      type={type}
+      className={cx(
+        'rounded-lg font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed',
+        tone === 'console' 
+          ? (variant === 'console-primary' || variant === 'console-secondary' || variant === 'console-danger' || variant === 'console-success' 
+             ? defaultStyles 
+             : 'ui-console-button')
+          : defaultStyles,
+        sizeStyles,
+        iconStyles,
+        className
+      )}
+      {...props}
+    />
+  );
+};
+
+type StatusState = 'idle' | 'done' | 'error' | 'warning' | 'info' | 'publishing';
+
+const getStatusColorClass = (state: StatusState, tone: UiTone): string => {
+  const stateToSemantic: Record<StatusState, { default: string; console: string }> = {
+    idle: { default: 'text-slate-300', console: 'text-slate-400' },
+    done: { default: 'text-emerald-300', console: 'text-emerald-400' },
+    error: { default: 'text-red-300', console: 'text-red-400' },
+    warning: { default: 'text-amber-300', console: 'text-amber-400' },
+    info: { default: 'text-cyan-300', console: 'text-cyan-400' },
+    publishing: { default: 'text-cyan-300', console: 'text-cyan-400' },
+  };
+
+return tone === 'console' ? stateToSemantic[state].console : stateToSemantic[state].default;
+};
+
+interface StatusMessageProps {
+  tone?: UiTone;
+  state: StatusState;
+  message: string;
+  className?: string;
+}
+
+export const StatusMessage: React.FC<StatusMessageProps> = ({ tone = 'default', state, message, className }) => {
+  if (!message) return null;
+
+const colorClass = getStatusColorClass(state, tone);
+
+return <p className={cx('text-xs', colorClass, className)}>{message}</p>;
+};
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/WebAudioMasterNativeControls.tsx ---
+import React from 'react';
+import { MasteringSettings } from '../services/offlineDb';
+
+interface Props {
+  settings: MasteringSettings;
+  onChange: (next: MasteringSettings) => void;
+}
+
+const eqPresets: Record<string, MasteringSettings['eq']> = {
+  flat: { low: 0, lowMid: 0, mid: 0, highMid: 0, high: 0 },
+  vocal: { low: -1, lowMid: -1, mid: 1.5, highMid: 2, high: 1.5 },
+  bass: { low: 3, lowMid: 1.5, mid: 0, highMid: -0.5, high: -1 },
+  bright: { low: -1, lowMid: 0, mid: 0.5, highMid: 2, high: 3 },
+  warm: { low: 1.5, lowMid: 1, mid: -0.5, highMid: -1, high: -0.5 },
+  aifix: { low: 0, lowMid: -1.5, mid: -0.5, highMid: -2, high: 1.5 },
+};
+
+const outputPresets = {
+  streaming: { sampleRate: 48000, bitDepth: 24 as const },
+  studio: { sampleRate: 48000, bitDepth: 24 as const },
+  cd: { sampleRate: 44100, bitDepth: 16 as const },
+};
+
+const boolFields: Array<[keyof MasteringSettings, string]> = [
+  ['glueCompression', 'Glue Compression'],
+  ['deharsh', 'De-harsh'],
+  ['cleanLowEnd', 'Clean Low End'],
+  ['autoLevel', 'Auto Level'],
+  ['addPunch', 'Add Punch'],
+  ['centerBass', 'Mono Bass'],
+  ['cutMud', 'Cut Mud'],
+  ['addAir', 'Add Air'],
+  ['tapeWarmth', 'Tape Warmth'],
+  ['normalizeLoudness', 'Normalize Loudness'],
+  ['truePeakLimit', 'True Peak Limit'],
+];
+
+const eqFields: Array<[keyof MasteringSettings['eq'], string]> = [
+  ['low', '80Hz'],
+  ['lowMid', '250Hz'],
+  ['mid', '1kHz'],
+  ['highMid', '4kHz'],
+  ['high', '12kHz'],
+];
+
+const WebAudioMasterNativeControls: React.FC<Props> = ({ settings, onChange }) => {
+  const setBool = (key: keyof MasteringSettings, value: boolean) => onChange({ ...settings, [key]: value });
+  const setNum = (key: keyof MasteringSettings, value: number) => onChange({ ...settings, [key]: value });
+  const setEq = (key: keyof MasteringSettings['eq'], value: number) =>
+    onChange({ ...settings, eq: { ...settings.eq, [key]: value } });
+
+const activeOutputPreset = Object.entries(outputPresets).find(
+    ([, preset]) => preset.sampleRate === settings.sampleRate && preset.bitDepth === settings.bitDepth
+  )?.[0];
+
+return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
+          <h4 className="text-sm font-semibold text-white">Quick Fix / Polish</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {boolFields.slice(0, 9).map(([key, label]) => (
+              <label key={String(key)} className="flex items-center gap-2 text-sm text-slate-300 rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings[key])}
+                  onChange={(e) => setBool(key, e.target.checked)}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+
+<section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
+          <h4 className="text-sm font-semibold text-white">Stereo / Loudness</h4>
+          <label className="block text-sm text-slate-300">
+            <div className="flex justify-between mb-1"><span>Input Gain</span><span>{settings.inputGain.toFixed(1)} dB</span></div>
+            <input
+              type="range"
+              min={-12}
+              max={12}
+              step={0.5}
+              value={settings.inputGain}
+              onChange={(e) => setNum('inputGain', Number(e.target.value))}
+              className="w-full"
+            />
+          </label>
+          <label className="block text-sm text-slate-300">
+            <div className="flex justify-between mb-1"><span>Stereo Width</span><span>{settings.stereoWidth}%</span></div>
+            <input
+              type="range"
+              min={0}
+              max={200}
+              step={5}
+              value={settings.stereoWidth}
+              onChange={(e) => setNum('stereoWidth', Number(e.target.value))}
+              className="w-full"
+            />
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-sm text-slate-300">
+              <div className="mb-1">Target LUFS</div>
+              <input type="number" min={-16} max={-6} step={0.5} value={settings.targetLufs} onChange={(e) => setNum('targetLufs', Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+            </label>
+            <label className="text-sm text-slate-300">
+              <div className="mb-1">Ceiling (dBTP)</div>
+              <input type="number" min={-6} max={0} step={0.5} value={settings.ceiling} onChange={(e) => setNum('ceiling', Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white" />
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {boolFields.slice(9).map(([key, label]) => (
+              <label key={String(key)} className="flex items-center gap-2 text-sm text-slate-300 rounded-lg border border-slate-800 bg-slate-950/70 px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(settings[key])}
+                  onChange={(e) => setBool(key, e.target.checked)}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+
+<section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
+          <h4 className="text-sm font-semibold text-white">Output</h4>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(outputPresets).map(([name, preset]) => (
+              <button
+                key={name}
+                type="button"
+                onClick={() => onChange({ ...settings, sampleRate: preset.sampleRate, bitDepth: preset.bitDepth })}
+                className={`px-3 py-1.5 rounded-lg text-xs border transition-colors ${activeOutputPreset === name ? 'border-emerald-500 text-emerald-300 bg-emerald-500/10' : 'border-slate-700 text-slate-300 hover:border-slate-500'}`}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="text-sm text-slate-300">
+              <div className="mb-1">Sample Rate</div>
+              <select value={settings.sampleRate} onChange={(e) => setNum('sampleRate', Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                <option value={44100}>44.1 kHz</option>
+                <option value={48000}>48 kHz</option>
+              </select>
+            </label>
+            <label className="text-sm text-slate-300">
+              <div className="mb-1">Bit Depth</div>
+              <select value={settings.bitDepth} onChange={(e) => setNum('bitDepth', Number(e.target.value))} className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-white">
+                <option value={16}>16-bit</option>
+                <option value={24}>24-bit</option>
+              </select>
+            </label>
+          </div>
+        </section>
+      </div>
+
+<section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <h4 className="text-sm font-semibold text-white">EQ</h4>
+          <div className="flex flex-wrap gap-2">
+            {Object.keys(eqPresets).map((presetName) => (
+              <button
+                key={presetName}
+                type="button"
+                onClick={() => onChange({ ...settings, eq: { ...eqPresets[presetName] } })}
+                className="px-2.5 py-1 text-xs rounded-lg border border-slate-700 text-slate-300 hover:border-emerald-500/60 hover:text-emerald-300"
+              >
+                {presetName}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {eqFields.map(([key, label]) => (
+            <label key={String(key)} className="text-sm text-slate-300">
+              <div className="flex justify-between mb-1">
+                <span>{label}</span>
+                <span className="text-slate-400">{settings.eq[key].toFixed(1)} dB</span>
+              </div>
+              <input
+                type="range"
+                min={-12}
+                max={12}
+                step={0.5}
+                value={settings.eq[key]}
+                onChange={(e) => setEq(key, Number(e.target.value))}
+                className="w-full"
+              />
+            </label>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+};
+
+export default WebAudioMasterNativeControls;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/SunoSettingsModal.tsx ---
+
+import React, { useState, useEffect, useRef } from 'react';
+import CopyButton from './CopyButton';
+import { getSunoCredits } from '../services/sunoApi';
+import { SUNO_MODEL_MAPPINGS, buildKnowledgeBase, GET_PROMPT_V1, GET_PROMPT_V2, GET_PROMPT_V3, DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS } from '../constants';
+import { PromptSettings, SunoLibrary, LyricalConstraints } from '../types';
+
+interface SunoSettingsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (cookie: string, model: string, promptSettings: PromptSettings) => void;
+  initialCookie: string;
+  initialModel: string;
+  initialPromptSettings: PromptSettings;
+  currentCredits: number | null;
+  isEmbedded?: boolean;
+}
+
+const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({ 
+  isOpen, 
+  onClose, 
+  onSave, 
+  initialCookie, 
+  initialModel,
+  initialPromptSettings,
+  currentCredits,
+  isEmbedded = false
+}) => {
+  const [activeTab, setActiveTab] = useState<'connection' | 'prompt'>('connection');
+  
+  // Connection State
+  const [cookie, setCookie] = useState('');
+  const [model, setModel] = useState('chirp-bluejay');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [verifyStatus, setVerifyStatus] = useState<{success: boolean, msg: string} | null>(null);
+  const [localCredits, setLocalCredits] = useState<number | null>(null);
+
+// Model Dropdown State
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
+
+// Prompt Settings State
+  const [promptSettings, setPromptSettings] = useState<PromptSettings>(initialPromptSettings);
+  
+  // Temporary state for editing text areas (joined arrays)
+  const [libGenres, setLibGenres] = useState('');
+  const [libStructures, setLibStructures] = useState('');
+  const [libVocals, setLibVocals] = useState('');
+  const [libProduction, setLibProduction] = useState('');
+  const [libTheory, setLibTheory] = useState('');
+  
+  const [constForbidden, setConstForbidden] = useState('');
+  const [constAdjectives, setConstAdjectives] = useState('');
+  const [constPhrases, setConstPhrases] = useState('');
+  const [constRhymes, setConstRhymes] = useState('');
+
+// Effect to load initial state when modal opens
+  useEffect(() => {
+    if (isOpen) {
+        setCookie(initialCookie);
+        setModel(initialModel || 'chirp-bluejay');
+        setLocalCredits(currentCredits);
+        setPromptSettings(initialPromptSettings);
+        
+        // Initialize Library Inputs
+        setLibGenres(initialPromptSettings.library.genres.join(', '));
+        setLibStructures(initialPromptSettings.library.structures.join(', '));
+        setLibVocals(initialPromptSettings.library.vocalStyles.join(', '));
+        setLibProduction(initialPromptSettings.library.production.join(', '));
+        setLibTheory(initialPromptSettings.library.theory.join(', '));
+        
+        // Initialize Constraints Inputs
+        setConstForbidden(initialPromptSettings.constraints.forbidden.join(', '));
+        setConstAdjectives(initialPromptSettings.constraints.forbiddenAdjectives.join(', '));
+        setConstPhrases(initialPromptSettings.constraints.forbiddenPhrases.join(', '));
+        setConstRhymes(initialPromptSettings.constraints.forbiddenRhymes);
+    }
+  }, [isOpen, initialCookie, initialModel, currentCredits, initialPromptSettings]);
+
+// Click outside listener for dropdown
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+      }
+    }
+    if (isModelDropdownOpen) {
+        document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isModelDropdownOpen]);
+
+// Handle version switching to auto-fill custom prompt if switching to a preset
+  const handleVersionChange = (newVersion: 'v1' | 'v2' | 'v3' | 'custom') => {
+      let newText = promptSettings.customSystemPrompt;
+      
+      const currentLib: SunoLibrary = {
+          genres: libGenres.split(',').map(s => s.trim()).filter(Boolean),
+          structures: libStructures.split(',').map(s => s.trim()).filter(Boolean),
+          vocalStyles: libVocals.split(',').map(s => s.trim()).filter(Boolean),
+          production: libProduction.split(',').map(s => s.trim()).filter(Boolean),
+          theory: libTheory.split(',').map(s => s.trim()).filter(Boolean),
+      };
+
+const currentConstraints: LyricalConstraints = {
+          forbidden: constForbidden.split(',').map(s => s.trim()).filter(Boolean),
+          forbiddenAdjectives: constAdjectives.split(',').map(s => s.trim()).filter(Boolean),
+          forbiddenPhrases: constPhrases.split(',').map(s => s.trim()).filter(Boolean),
+          forbiddenRhymes: constRhymes
+      };
+
+const kb = buildKnowledgeBase(currentLib);
+
+if (newVersion === 'v1') {
+          newText = GET_PROMPT_V1(kb);
+      } else if (newVersion === 'v2') {
+          newText = GET_PROMPT_V2(kb, currentConstraints);
+      } else if (newVersion === 'v3') {
+          newText = GET_PROMPT_V3();
+      }
+      
+      setPromptSettings(prev => ({
+          ...prev,
+          version: newVersion,
+          customSystemPrompt: newText
+      }));
+  };
+
+const handleResetDefaults = () => {
+    if(window.confirm("Reset all library definitions and constraints to default?")) {
+        setLibGenres(DEFAULT_SUNO_LIBRARY.genres.join(', '));
+        setLibStructures(DEFAULT_SUNO_LIBRARY.structures.join(', '));
+        setLibVocals(DEFAULT_SUNO_LIBRARY.vocalStyles.join(', '));
+        setLibProduction(DEFAULT_SUNO_LIBRARY.production.join(', '));
+        setLibTheory(DEFAULT_SUNO_LIBRARY.theory.join(', '));
+        
+        setConstForbidden(DEFAULT_LYRICAL_CONSTRAINTS.forbidden.join(', '));
+        setConstAdjectives(DEFAULT_LYRICAL_CONSTRAINTS.forbiddenAdjectives.join(', '));
+        setConstPhrases(DEFAULT_LYRICAL_CONSTRAINTS.forbiddenPhrases.join(', '));
+        setConstRhymes(DEFAULT_LYRICAL_CONSTRAINTS.forbiddenRhymes);
+    }
+  };
+
+const handleVerify = async () => {
+      setIsVerifying(true);
+      setVerifyStatus(null);
+      try {
+          const credits = await getSunoCredits(cookie);
+          setLocalCredits(credits);
+          setVerifyStatus({ success: true, msg: `Verified! Available Credits: ${credits}` });
+      } catch (e: any) {
+          setVerifyStatus({ success: false, msg: e.message || "Failed to verify. Check your token." });
+          setLocalCredits(null);
+      } finally {
+          setIsVerifying(false);
+      }
+  };
+
+const handleSave = () => {
+      const currentLib: SunoLibrary = {
+          genres: libGenres.split(',').map(s => s.trim()).filter(Boolean),
+          structures: libStructures.split(',').map(s => s.trim()).filter(Boolean),
+          vocalStyles: libVocals.split(',').map(s => s.trim()).filter(Boolean),
+          production: libProduction.split(',').map(s => s.trim()).filter(Boolean),
+          theory: libTheory.split(',').map(s => s.trim()).filter(Boolean),
+      };
+
+const currentConstraints: LyricalConstraints = {
+          forbidden: constForbidden.split(',').map(s => s.trim()).filter(Boolean),
+          forbiddenAdjectives: constAdjectives.split(',').map(s => s.trim()).filter(Boolean),
+          forbiddenPhrases: constPhrases.split(',').map(s => s.trim()).filter(Boolean),
+          forbiddenRhymes: constRhymes
+      };
+
+const newSettings: PromptSettings = {
+          ...promptSettings,
+          library: currentLib,
+          constraints: currentConstraints
+      };
+
+onSave(cookie, model, newSettings);
+      onClose();
+  };
+
+const tokenSnippet = `(async () => {
+  const sessionToken = await window?.Clerk?.session?.getToken?.();
+
+if (!sessionToken) {
+    console.error("Session token not found. Make sure you are logged in at suno.com");
+    return;
+  }
+
+console.log("%c Suno Session Token Found! ", "background: #222; color: #bada55; font-size: 14px;");
+  console.log(sessionToken);
+
+const copyWithExecCommand = (text) => {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.focus();
+    textarea.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (err) {
+      ok = false;
+    }
+    document.body.removeChild(textarea);
+    return ok;
+  };
+
+let copied = false;
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(sessionToken);
+      copied = true;
+    }
+  } catch (err) {}
+
+if (!copied) {
+    copied = copyWithExecCommand(sessionToken);
+  }
+
+if (copied) {
+    console.log("%c Result copied to clipboard automatically.", "color: gray;");
+  } else {
+    console.warn("Auto-copy failed. Token is printed above for manual copy.");
+  }
+})();`;
+
+if (!isOpen) return null;
+
+const content = (
+    <div className={`flex flex-col ${isEmbedded ? 'h-full' : 'bg-slate-900 border border-[var(--app-panel-border)] rounded-2xl w-full max-w-4xl shadow-2xl max-h-[90vh]'}`}>
+      
+      {/* Modal Header & Tabs */}
+      {!isEmbedded && (
+        <div className="flex-shrink-0 border-b border-[var(--app-panel-border)] bg-[var(--app-panel)] p-4 rounded-t-2xl flex justify-between items-center">
+            <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                <span className="bg-[var(--app-panel)] p-2 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-pink-400">
+                        <circle cx="12" cy="12" r="10"></circle>
+                        <polygon points="10 8 16 12 10 16 10 8"></polygon>
+                    </svg>
+                </span>
+                Settings
+            </h2>
+            <button onClick={onClose} className="text-slate-400 hover:text-white"><svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+        </div>
+      )}
+
+{isEmbedded && <h3 className="text-lg font-bold text-white mb-6 p-6 pb-0">Suno Integration</h3>}
+      
+      {/* Tabs */}
+      <div className="flex bg-slate-950/50 border-b border-[var(--app-panel-border)]">
+            <button 
+                onClick={() => setActiveTab('connection')}
+                className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'connection' ? 'text-[var(--app-accent)] border-b-2 border-purple-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+                API Connection
+            </button>
+            <button 
+                onClick={() => setActiveTab('prompt')}
+                className={`flex-1 py-3 text-sm font-bold transition-colors ${activeTab === 'prompt' ? 'text-[var(--app-accent)] border-b-2 border-purple-400 bg-slate-900' : 'text-slate-500 hover:text-slate-300'}`}
+            >
+                Prompt Engineering
+            </button>
+        </div>
+
+{/* Content Area */}
+        <div className="flex-grow overflow-y-auto custom-scrollbar p-6">
+            
+            {/* --- TAB: CONNECTION --- */}
+            {activeTab === 'connection' && (
+                <div className="space-y-6 max-w-lg mx-auto">
+                    <p className="text-sm text-slate-400 leading-relaxed">
+                        To sync directly with Suno, provide your <strong>Authorization Token</strong> (Bearer) or Session Cookie.
+                    </p>
+
+<div className="bg-slate-950/50 border border-purple-500/20 rounded-xl p-4">
+                        <div className="flex justify-between items-start mb-2">
+                            <h3 className="text-xs font-bold text-purple-300 uppercase tracking-wider">Auto-Get Token Script</h3>
+                            <CopyButton text={tokenSnippet} label="Copy Script" />
+                        </div>
+                        <p className="text-xs text-slate-400 mb-3">
+                            1. Go to suno.com and log in.<br/>
+                            2. Open Developer Tools (F12) &gt; Console.<br/>
+                            3. Paste this code and hit Enter.
+                        </p>
+                        <div className="bg-black/50 rounded-lg p-3 overflow-x-auto border border-white/5 shadow-inner">
+                            <pre className="text-[10px] font-mono text-slate-400 whitespace-pre-wrap">{tokenSnippet}</pre>
+                        </div>
+                    </div>

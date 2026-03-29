@@ -1,0 +1,2400 @@
+
+
+const onImportAlbumJsonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      setAlbumTitle(data.title || '');
+      setAlbumDescription(data.description || '');
+      setAlbumType(data.type || 'EP');
+      if (Array.isArray(data.trackIds)) {
+        const validIds = data.trackIds.filter((id: string) => trackById.has(id));
+        setBuilderTrackIds(validIds);
+      }
+    } catch { alert('Invalid JSON file'); }
+    e.target.value = '';
+  };
+
+const exportCurrentDraftJson = () => {
+    const data = JSON.stringify({ title: albumTitle, description: albumDescription, type: albumType, trackIds: builderTrackIds }, null, 2);
+    const blob = new Blob([data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${albumTitle || 'album'}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+const onSaveAlbum = async () => {
+    if (!albumTitle.trim() || builderTrackIds.length === 0) return;
+    setSaveState('saving');
+    setSaveMessage('');
+    try {
+      const album: OfflineAlbum = {
+        id: editingAlbumId || crypto.randomUUID(),
+        title: albumTitle,
+        description: albumDescription,
+        type: albumType,
+        trackIds: builderTrackIds,
+        coverArtUrl: '',
+        raw: null,
+        createdAt: editingAlbumId ? savedAlbums.find(a => a.id === editingAlbumId)?.createdAt : Date.now(),
+        updatedAt: Date.now()
+      };
+      await upsertAlbums([album]);
+      await refreshSavedAlbums();
+      setEditingAlbumId(album.id);
+      setSelectedSavedAlbumId(album.id);
+      setSaveState('saved');
+      setSaveMessage('Album saved!');
+      setAriaLiveMessage(`Album saved: ${album.title}`);
+    } catch (e: any) {
+      setSaveState('error');
+      setSaveMessage(e?.message || 'Failed to save');
+    }
+  };
+
+const onDownloadAlbumZip = async () => {
+    if (builderTrackIds.length === 0) return;
+    setZipState('packing');
+    setZipMessage('Packing ZIP...');
+    try {
+      await downloadTracksZipFromCache(albumTitle || 'album', builderTrackIds, 'album');
+      setZipState('done');
+      setZipMessage('ZIP ready!');
+      setAriaLiveMessage('Album ZIP downloaded.');
+    } catch (e: any) {
+      setZipState('error');
+      setZipMessage(e?.message || 'Failed to create ZIP');
+    }
+  };
+
+const totalLibraryHeight = filteredLibraryTracks.length * LIBRARY_ROW_HEIGHT;
+  const topOffset = Math.floor(libraryScrollTop / LIBRARY_ROW_HEIGHT) * LIBRARY_ROW_HEIGHT;
+  const visibleCount = Math.ceil(500 / LIBRARY_ROW_HEIGHT) + 2;
+  const visibleLibraryTracks = filteredLibraryTracks.slice(topOffset / LIBRARY_ROW_HEIGHT, topOffset / LIBRARY_ROW_HEIGHT + visibleCount);
+
+const selectedFilteredCount = useMemo(() => 
+    filteredLibraryTracks.reduce((count, track) => count + (selectedLibraryTrackIdSet.has(track.id) ? 1 : 0), 0),
+    [filteredLibraryTracks, selectedLibraryTrackIdSet]
+  );
+
+const builderDrop = useDroppable({ id: 'droppable' });
+
+const activeTrack = activeDragTrackId ? trackById.get(activeDragTrackId) : null;
+
+return (
+    <div className="max-w-7xl mx-auto space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+      <div>
+        <h2 className="text-2xl font-bold text-white uppercase tracking-tight">Album Builder</h2>
+        <p className="text-[11px] text-cyan-700/80 font-mono mt-1 uppercase tracking-wider">
+          System.Curator: Build structured albums from local library tracks. Drag from the left pane into the right assembly zone.
+        </p>
+      </div>
+
+{savedAlbumsState === 'error' && (
+        <div className="rounded border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs font-mono text-red-200">
+          [ERROR] {savedAlbumsMessage}
+        </div>
+      )}
+
+<DndContext
+        sensors={sensors}
+        onDragStart={(event) => {
+          const id = String(event.active.id);
+          if (id.startsWith('library:')) setActiveDragTrackId(id.replace('library:', ''));
+          if (id.startsWith('builder:')) setActiveDragTrackId(id.replace('builder:', ''));
+        }}
+        onDragEnd={onDragEnd}
+        onDragCancel={() => setActiveDragTrackId(null)}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <AppCard tone="console" className="lg:col-span-4 p-4">
+            <div className="flex items-center justify-between mb-3 border-b border-cyan-900/40 pb-2">
+              <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Library.Tracks</h3>
+              <span className="text-[10px] font-mono text-cyan-800 tracking-tighter">{filteredLibraryTracks.length}/{libraryTracks.length} OBJECTS</span>
+            </div>
+            <div className="space-y-3 mb-3">
+              <AppInput
+                tone="console"
+                value={libraryQuery}
+                onChange={(e) => setLibraryQuery(e.target.value)}
+                placeholder="Search title or ID"
+                aria-label="Search library tracks"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <AppSelect tone="console" value={libraryAvailabilityFilter} onChange={(e) => setLibraryAvailabilityFilter(e.target.value as LibraryAvailabilityFilter)} aria-label="Filter by availability">
+                  <option value="all">All Sources</option>
+                  <option value="cached">Cached Only</option>
+                  <option value="remote">Remote Only</option>
+                </AppSelect>
+                <AppSelect tone="console" value={librarySortMode} onChange={(e) => setLibrarySortMode(e.target.value as LibrarySortMode)} aria-label="Sort order">
+                  <option value="title-asc">Title A-Z</option>
+                  <option value="title-desc">Title Z-A</option>
+                  <option value="duration-asc">Duration ↑</option>
+                  <option value="duration-desc">Duration ↓</option>
+                </AppSelect>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => setSelectedLibraryTrackIds(filteredLibraryTracks.map(t => t.id))} disabled={filteredLibraryTracks.length === 0}>
+                Select All ({selectedFilteredCount})
+              </AppButton>
+              <AppButton tone="console" variant="console-primary" size="xs" onClick={addSelectedTracksToBuilder} disabled={selectedLibraryTrackIds.length === 0}>
+                Add Selected
+              </AppButton>
+              <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => setSelectedLibraryTrackIds([])} disabled={selectedLibraryTrackIds.length === 0}>
+                Clear
+              </AppButton>
+            </div>
+            <div ref={libraryContainerRef} onScroll={(e) => setLibraryScrollTop(e.currentTarget.scrollTop)} className="h-[400px] overflow-y-auto rounded-lg border border-cyan-900/40 bg-black/30 custom-scrollbar">
+              <div style={{ height: totalLibraryHeight, position: 'relative' }}>
+                <div style={{ transform: `translateY(${topOffset}px)` }} className="space-y-2 p-2">
+                  {filteredLibraryTracks.length === 0 && (
+                    <div className="h-24 grid place-items-center text-[11px] font-mono text-cyan-900 border border-dashed border-cyan-900/40 rounded">
+                      [EMPTY] NO_MATCHES_FOUND
+                    </div>
+                  )}
+                  {visibleLibraryTracks.map((track) => (
+                    <LibraryRow key={track.id} track={track} isSelected={selectedLibraryTrackIdSet.has(track.id)} isAlreadyInBuilder={builderTrackIdSet.has(track.id)} onToggleSelected={(id) => setSelectedLibraryTrackIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])} onAddToBuilder={addTrackToBuilder} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </AppCard>
+
+<AppCard tone="console" className="lg:col-span-8 p-4">
+            <div className="border border-cyan-900/40 bg-cyan-950/20 p-3 mb-3 rounded shadow-inner">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-3 border-b border-cyan-900/40 pb-2">
+                <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest">Saved.Albums {editingAlbumId ? `[EDITING]` : '[NEW_DRAFT]'}</h3>
+                <div className="flex flex-wrap gap-1">
+                  <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => refreshSavedAlbums(true)}>Refresh</AppButton>
+                  <AppButton tone="console" variant="console-secondary" size="xs" onClick={startNewDraftFromCurrent} disabled={!editingAlbumId}>Save As New</AppButton>
+                  <AppButton tone="console" variant="console-primary" size="xs" onClick={() => selectedSavedAlbum && loadSavedAlbumIntoDraft(selectedSavedAlbum)} disabled={!selectedSavedAlbum}>Load</AppButton>
+                  <AppButton tone="console" variant="console-danger" size="xs" onClick={onDeleteSelectedSavedAlbum} disabled={!selectedSavedAlbum}>{isDeleteConfirmArmed ? 'Confirm' : 'Delete'}</AppButton>
+                  <AppButton tone="console" variant="console-success" size="xs" onClick={() => selectedSavedAlbum && exportAlbumJson(selectedSavedAlbum)} disabled={!selectedSavedAlbum}>Export</AppButton>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-2 mb-2">
+                <AppSelect tone="console" value={selectedSavedAlbumId} onChange={(e) => { setSelectedSavedAlbumId(e.target.value); setIsDeleteConfirmArmed(false); }} aria-label="Select saved album">
+                  <option value="">Select saved album...</option>
+                  {savedAlbums.map((album) => <option key={album.id} value={album.id}>{album.title?.toUpperCase() || 'UNTITLED'} • {album.trackIds?.length || 0} TRACKS</option>)}
+                </AppSelect>
+              </div>
+              <div className="min-h-5 flex items-center justify-between">
+                {savedAlbumsState === 'loading' && <p className="text-[10px] font-mono text-cyan-700 animate-pulse">SYSTEM_LOADING...</p>}
+                {isDeleteConfirmArmed && <p className="text-[10px] font-bold text-red-500 uppercase tracking-tight animate-bounce">! DELETE_ARMED !</p>}
+                {selectedSavedAlbum && <p className="text-[10px] font-mono text-cyan-800 uppercase tracking-tighter">Selected: <span className="text-cyan-400">{selectedSavedAlbum.title}</span> • {selectedSavedAlbum.trackIds?.length || 0} TRACKS</p>}
+              </div>
+            </div>
+
+<div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+              <AppInput tone="console" value={albumTitle} onChange={(e) => setAlbumTitle(e.target.value)} placeholder="Album title" className="md:col-span-2 font-bold" />
+              <AppSelect tone="console" value={albumType} onChange={(e) => setAlbumType(e.target.value as AlbumType)} aria-label="Album type">
+                <option value="EP">EP</option>
+                <option value="LP">LP</option>
+                <option value="GreatestHits">Greatest Hits</option>
+                <option value="Single">Single</option>
+              </AppSelect>
+            </div>
+
+<AppTextarea tone="console" value={albumDescription} onChange={(e) => setAlbumDescription(e.target.value)} placeholder="Album description" className="h-20 mb-3 text-xs" />
+
+<div ref={builderDrop.setNodeRef} className={cx('border min-h-[250px] p-2 rounded mb-3 transition-colors', builderDrop.isOver ? 'border-cyan-400 bg-cyan-900/10' : 'border-cyan-900/40 bg-black/40 shadow-inner')}>
+              <SortableContext items={builderTrackIds.map(id => `builder:${id}`)} strategy={verticalListSortingStrategy}>
+                {builderTracks.length === 0 && (
+                  <div className="h-[200px] grid place-items-center text-[11px] font-mono text-cyan-900 border border-dashed border-cyan-900/40 rounded">
+                    [DROP_ZONE] ASSEMBLY_AREA_EMPTY
+                  </div>
+                )}
+                <div className="space-y-1">
+                  {builderTracks.map((track, index) => (
+                    <BuilderRow key={track.id} track={track} index={index} onRemove={(id) => { setBuilderTrackIds(prev => prev.filter(i => i !== id)); setAriaLiveMessage('Track removed.'); }} />
+                  ))}
+                </div>
+              </SortableContext>
+            </div>
+
+<DragOverlay>
+              {activeTrack && (
+                <div className="p-2 rounded border border-cyan-400 bg-cyan-900/90 shadow-2xl backdrop-blur-md">
+                  <p className="text-xs font-bold text-white uppercase tracking-wider">{activeTrack.title}</p>
+                </div>
+              )}
+            </DragOverlay>
+
+<div className="flex flex-col md:flex-row items-center justify-between gap-3 mb-3 border-t border-cyan-900/40 pt-3">
+              <p className="text-[10px] font-mono text-cyan-800 uppercase tracking-tighter">
+                {builderTracks.length} TRACKS • {formatDuration(totalBuilderDurationMs)} TOTAL_TIME • TYPE: {albumType}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <input ref={importAlbumInputRef} type="file" accept="application/json" onChange={onImportAlbumJsonFile} className="hidden" />
+                <AppButton tone="console" variant="console-danger" size="xs" onClick={clearDraftAlbum} disabled={builderTrackIds.length === 0}>Clear</AppButton>
+                <AppButton tone="console" variant="console-secondary" size="xs" onClick={() => importAlbumInputRef.current?.click()}>Import</AppButton>
+                <AppButton tone="console" variant="console-secondary" size="xs" onClick={exportCurrentDraftJson} disabled={builderTrackIds.length === 0}>Export</AppButton>
+                <AppButton tone="console" variant="console-success" size="xs" onClick={onDownloadAlbumZip} disabled={builderTrackIds.length === 0 || zipState === 'packing'}>
+                  {zipState === 'packing' ? 'Packing...' : 'Download ZIP'}
+                </AppButton>
+                <AppButton tone="console" variant="console-primary" size="xs" onClick={onSaveAlbum} disabled={!albumTitle.trim() || builderTrackIds.length === 0 || saveState === 'saving'}>
+                  {saveState === 'saving' ? 'Saving...' : editingAlbumId ? 'Update' : 'Save'}
+                </AppButton>
+              </div>
+            </div>
+
+<div className="min-h-5">
+              {saveMessage && <StatusMessage tone="console" state={saveState === 'saved' ? 'done' : saveState === 'error' ? 'error' : 'idle'} message={saveMessage} />}
+              {zipMessage && <StatusMessage tone="console" state={zipState === 'done' ? 'done' : zipState === 'error' ? 'error' : 'idle'} message={zipMessage} />}
+            </div>
+          </AppCard>
+        </div>
+      </DndContext>
+
+<div className="sr-only" aria-live="polite">{ariaLiveMessage}</div>
+    </div>
+  );
+};
+
+export default AlbumBuilderSection;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/LibraryPickerModal.tsx ---
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { OfflineTrack, TrackVariant } from '../services/offlineDb';
+
+export interface LibrarySelection {
+  track: OfflineTrack;
+  variant?: TrackVariant;
+}
+
+interface LibraryPickerModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSelectTrack: (selection: LibrarySelection) => void;
+}
+
+const LibraryPickerModal: React.FC<LibraryPickerModalProps> = ({ isOpen, onClose, onSelectTrack }) => {
+  const [tracks, setTracks] = useState<OfflineTrack[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+
+useEffect(() => {
+    if (isOpen) {
+      loadTracks();
+    }
+  }, [isOpen]);
+
+const loadTracks = async () => {
+    setLoading(true);
+    try {
+      const { listAllTracks } = await import('../services/offlineDb');
+      const allTracks = await listAllTracks();
+      setTracks(allTracks);
+    } catch (error) {
+      console.error('Failed to load tracks:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+const filteredTracks = tracks.filter(track =>
+    track.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    track.metadata.tags.some(tag => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
+const handleSelect = (track: OfflineTrack, variant?: TrackVariant) => {
+    onSelectTrack({ track, variant });
+    onClose();
+  };
+
+if (!isOpen) return null;
+
+const modalContent = (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
+      <div className="bg-slate-900 border border-[var(--app-panel-border)] rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col my-4 sm:my-8 max-h-[calc(100vh-2rem)] sm:max-h-[85vh] overflow-hidden">
+        {/* Header */}
+        <div className="flex-shrink-0 border-b border-[var(--app-panel-border)] bg-[var(--app-panel)] p-3 sm:p-4 rounded-t-2xl flex justify-between items-center gap-2">
+          <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6a2 2 0 0 1 2-2h3v16H5a2 2 0 0 0-2 2z" />
+              <path d="M21 6a2 2 0 0 0-2-2h-3v16h3a2 2 0 0 1 2 2z" />
+              <path d="M8 4h8v16H8z" />
+            </svg>
+            <span className="hidden sm:inline">Select from Library</span>
+            <span className="sm:hidden">Library</span>
+          </h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-1">
+            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+{/* Search - sticky at top */}
+        <div className="flex-shrink-0 p-3 sm:p-4 border-b border-[var(--app-panel-border)] bg-slate-900">
+          <input
+            type="text"
+            placeholder="Search tracks..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            autoFocus
+            className="w-full bg-slate-950 border border-[var(--app-panel-border)] rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:ring-1 focus:ring-emerald-500 outline-none"
+          />
+        </div>
+
+{/* Track List */}
+        <div className="flex-grow overflow-y-auto custom-scrollbar p-2 min-h-[200px]">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-400"></div>
+            </div>
+          ) : filteredTracks.length === 0 ? (
+            <div className="text-center py-12 text-slate-400">
+              {tracks.length === 0 ? (
+                <>
+                  <p className="text-lg mb-2">No tracks in library</p>
+                  <p className="text-sm">Sync your library from Suno to see tracks here</p>
+                </>
+              ) : (
+                <p>No tracks match your search</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-1">
+              {filteredTracks.map((track) => {
+                const variants = [...(track.variants || [])].sort((a, b) => b.createdAt - a.createdAt);
+                return (
+                  <div
+                    key={track.id}
+                    className="rounded-lg border border-transparent hover:border-[var(--app-panel-border)] bg-transparent hover:bg-[var(--app-panel)]/40 transition-colors"
+                  >
+                    <button
+                      onClick={() => handleSelect(track)}
+                      className="w-full flex items-center gap-3 p-3 text-left group"
+                    >
+                      <div className="w-12 h-12 rounded-md bg-slate-800 flex-shrink-0 overflow-hidden">
+                        {track.imageUrl ? (
+                          <img src={track.imageUrl} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M9 18V5l12-2v13" />
+                              <circle cx="6" cy="18" r="3" />
+                              <circle cx="18" cy="16" r="3" />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex-grow min-w-0">
+                        <p className="text-white font-medium truncate group-hover:text-emerald-400 transition-colors">
+                          {track.title}
+                        </p>
+                        <p className="text-slate-500 text-sm truncate">
+                          {track.metadata.tags.slice(0, 3).join(', ') || 'No tags'}
+                        </p>
+                      </div>
+                      <div className="flex-shrink-0 text-right">
+                        <div className="text-slate-500 text-xs">
+                          {track.metadata.durationMs ? (
+                            <span>{Math.floor(track.metadata.durationMs / 60000)}:{String(Math.floor((track.metadata.durationMs % 60000) / 1000)).padStart(2, '0')}</span>
+                          ) : null}
+                        </div>
+                        <div className="mt-1 text-[10px] uppercase tracking-wide text-emerald-400/80">
+                          Original
+                        </div>
+                      </div>
+                    </button>
+
+{variants.length > 0 && (
+                      <div className="px-3 pb-3">
+                        <div className="ml-[60px] flex flex-wrap gap-2">
+                          {variants.slice(0, 4).map((variant) => (
+                            <button
+                              key={variant.id}
+                              onClick={() => handleSelect(track, variant)}
+                              className="px-2.5 py-1 text-xs rounded-full border border-slate-700 text-slate-200 hover:border-emerald-500/60 hover:text-emerald-300 transition-colors"
+                              title={`Use ${variant.type} variant as reference`}
+                            >
+                              {variant.type}: {variant.title}
+                            </button>
+                          ))}
+                          {variants.length > 4 && (
+                            <span className="px-2.5 py-1 text-xs rounded-full border border-slate-800 text-slate-500">
+                              +{variants.length - 4} more
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+{/* Footer */}
+        <div className="flex-shrink-0 flex justify-end gap-3 p-3 sm:p-4 border-t border-[var(--app-panel-border)] bg-[var(--app-panel)] rounded-b-2xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-[var(--app-panel)] rounded-lg transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+return createPortal(modalContent, document.body);
+};
+
+export default LibraryPickerModal;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/WebAudioMasterNativePreview.tsx ---
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { MasteringSettings } from '../services/offlineDb';
+import { renderNativePreviewBufferFromBlob } from '../services/mastering/nativeMasteringPipeline';
+
+interface Props {
+  sourceBlob: Blob | null;
+  sourceFileName: string;
+  settings: MasteringSettings;
+  onStatusChange?: (summary: NativePreviewStatusSummary) => void;
+}
+
+type PlaybackState = 'idle' | 'rendering' | 'ready' | 'playing' | 'paused' | 'error';
+
+export interface NativePreviewStatusSummary {
+  status: PlaybackState;
+  statusMessage: string;
+  hasSource: boolean;
+  hasPreview: boolean;
+  renderProgress: number | null;
+}
+
+function formatTime(value: number) {
+  if (!Number.isFinite(value)) return '0:00';
+  const total = Math.max(0, Math.floor(value));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function getPeakDbFromFloatTimeDomain(data: Float32Array) {
+  let peak = 0;
+  for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i]));
+  return peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+}
+
+function getRmsDbFromFloatTimeDomain(data: Float32Array) {
+  if (!data.length) return -Infinity;
+  let sum = 0;
+  for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+  const rms = Math.sqrt(sum / data.length);
+  return rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+}
+
+function getRmsDbFromBuffer(buffer: AudioBuffer) {
+  const channels = Math.min(2, buffer.numberOfChannels);
+  if (!channels) return -Infinity;
+  const length = buffer.length;
+  let sum = 0;
+  for (let ch = 0; ch < channels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) sum += data[i] * data[i];
+  }
+  const rms = Math.sqrt(sum / (length * channels));
+  return rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+}
+
+function getRmsDbWindowFromBuffer(buffer: AudioBuffer, startSec: number, windowSec = 0.75) {
+  const channels = Math.min(2, buffer.numberOfChannels);
+  if (!channels) return null;
+  const sampleRate = buffer.sampleRate;
+  const start = Math.max(0, Math.floor(startSec * sampleRate));
+  const end = Math.min(buffer.length, start + Math.max(1, Math.floor(windowSec * sampleRate)));
+  if (end <= start) return null;
+
+let sum = 0;
+  let count = 0;
+  for (let ch = 0; ch < channels; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = start; i < end; i++) {
+      const v = data[i];
+      sum += v * v;
+      count++;
+    }
+  }
+  if (!count) return null;
+  const rms = Math.sqrt(sum / count);
+  if (!(rms > 0)) return -Infinity;
+  return 20 * Math.log10(rms);
+}
+
+function estimateTruePeakDb(dataL: Float32Array, dataR: Float32Array) {
+  let peak = 0;
+  const scan = (data: Float32Array) => {
+    for (let i = 0; i < data.length; i++) {
+      peak = Math.max(peak, Math.abs(data[i]));
+      if (i < data.length - 1) {
+        const a = data[i];
+        const b = data[i + 1];
+        peak = Math.max(
+          peak,
+          Math.abs(a + (b - a) * 0.25),
+          Math.abs(a + (b - a) * 0.5),
+          Math.abs(a + (b - a) * 0.75)
+        );
+      }
+    }
+  };
+  scan(dataL);
+  scan(dataR);
+  return peak > 0 ? 20 * Math.log10(peak) : -Infinity;
+}
+
+const WebAudioMasterNativePreview: React.FC<Props> = ({ sourceBlob, sourceFileName, settings, onStatusChange }) => {
+  const [status, setStatus] = useState<PlaybackState>('idle');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [renderProgress, setRenderProgress] = useState<number | null>(null);
+  const [originalBuffer, setOriginalBuffer] = useState<AudioBuffer | null>(null);
+  const [processedBuffer, setProcessedBuffer] = useState<AudioBuffer | null>(null);
+  const [bypassFx, setBypassFx] = useState(false);
+  const [levelMatchEnabled, setLevelMatchEnabled] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [renderedLufs, setRenderedLufs] = useState<number | null>(null);
+  const [rmsDbOriginal, setRmsDbOriginal] = useState<number | null>(null);
+  const [rmsDbProcessed, setRmsDbProcessed] = useState<number | null>(null);
+  const [meterL, setMeterL] = useState<number>(-Infinity);
+  const [meterR, setMeterR] = useState<number>(-Infinity);
+  const [liveRmsL, setLiveRmsL] = useState<number>(-Infinity);
+  const [liveRmsR, setLiveRmsR] = useState<number>(-Infinity);
+  const [peakHoldL, setPeakHoldL] = useState<number>(-Infinity);
+  const [peakHoldR, setPeakHoldR] = useState<number>(-Infinity);
+  const [truePeakDb, setTruePeakDb] = useState<number>(-Infinity);
+  const [truePeakHoldDb, setTruePeakHoldDb] = useState<number>(-Infinity);
+  const [isOverloaded, setIsOverloaded] = useState(false);
+  const [showSpectrum, setShowSpectrum] = useState(true);
+  const [debugBufferRmsAtPlayhead, setDebugBufferRmsAtPlayhead] = useState<number | null>(null);
+  const [debugSourceRmsAtPlayhead, setDebugSourceRmsAtPlayhead] = useState<number | null>(null);
+  const [debugPreviewRmsAtPlayhead, setDebugPreviewRmsAtPlayhead] = useState<number | null>(null);
+
+const waveformCanvasRef = useRef<HTMLCanvasElement>(null);
+  const waveformStaticCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const waveformProcessedStaticRef = useRef<HTMLCanvasElement | null>(null);
+  const waveformOriginalStaticRef = useRef<HTMLCanvasElement | null>(null);
+  const meterCanvasRef = useRef<HTMLCanvasElement>(null);
+  const spectrumCanvasRef = useRef<HTMLCanvasElement>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const sourceNodeRef = useRef<AudioBufferSourceNode | null>(null);
+  const analyserLRef = useRef<AnalyserNode | null>(null);
+  const analyserRRef = useRef<AnalyserNode | null>(null);
+  const gainRef = useRef<GainNode | null>(null);
+  const splitterRef = useRef<ChannelSplitterNode | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const startTimeRef = useRef(0);
+  const pauseTimeRef = useRef(0);
+  const renderSeqRef = useRef(0);
+  const transportSeqRef = useRef(0);
+  const isPlayingRef = useRef(false);
+  const durationRef = useRef(0);
+  const currentTimeRef = useRef(0);
+  const peakHoldLRef = useRef<number>(-Infinity);
+  const peakHoldRRef = useRef<number>(-Infinity);
+  const truePeakHoldDbRef = useRef<number>(-Infinity);
+  const isOverloadedRef = useRef(false);
+  const showSpectrumRef = useRef(true);
+
+const activeBuffer = useMemo(
+    () => (bypassFx ? originalBuffer : processedBuffer) ?? null,
+    [bypassFx, processedBuffer, originalBuffer]
+  );
+
+const diagnostics = useMemo(() => {
+    if (!originalBuffer && !processedBuffer) return [];
+    const maxDuration = Math.max(originalBuffer?.duration || 0, processedBuffer?.duration || 0);
+    const checkpoints = [10, 30, 60, 90, 120, 150].filter((sec) => sec < maxDuration - 0.5);
+    return checkpoints.map((sec) => ({
+      sec,
+      sourceDb: originalBuffer ? getRmsDbWindowFromBuffer(originalBuffer, sec) : null,
+      previewDb: processedBuffer ? getRmsDbWindowFromBuffer(processedBuffer, sec) : null,
+    }));
+  }, [originalBuffer, processedBuffer]);
+
+const getPreviewGainLinear = () => {
+    if (!levelMatchEnabled || !bypassFx || rmsDbOriginal == null || rmsDbProcessed == null) return 1;
+    const deltaDb = Math.max(-6, Math.min(6, rmsDbProcessed - rmsDbOriginal));
+    return Math.pow(10, deltaDb / 20);
+  };
+
+const applyOutputGain = () => {
+    const ctx = audioCtxRef.current;
+    const gain = gainRef.current;
+    if (!ctx || !gain) return;
+    const now = ctx.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(getPreviewGainLinear(), now);
+  };
+
+useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+useEffect(() => {
+    durationRef.current = duration;
+  }, [duration]);
+
+useEffect(() => {
+    currentTimeRef.current = currentTime;
+  }, [currentTime]);
+
+useEffect(() => {
+    peakHoldLRef.current = peakHoldL;
+  }, [peakHoldL]);
+
+useEffect(() => {
+    peakHoldRRef.current = peakHoldR;
+  }, [peakHoldR]);
+
+useEffect(() => {
+    truePeakHoldDbRef.current = truePeakHoldDb;
+  }, [truePeakHoldDb]);
+
+useEffect(() => {
+    isOverloadedRef.current = isOverloaded;
+  }, [isOverloaded]);
+
+useEffect(() => {
+    showSpectrumRef.current = showSpectrum;
+  }, [showSpectrum]);
+
+useEffect(() => {
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (sourceNodeRef.current) {
+        try { sourceNodeRef.current.stop(); } catch {}
+      }
+      if (audioCtxRef.current && audioCtxRef.current.state !== 'closed') {
+        void audioCtxRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
+useEffect(() => {
+    if (!sourceBlob) {
+      setStatus('idle');
+      setStatusMessage('');
+      setOriginalBuffer(null);
+      setProcessedBuffer(null);
+      setDuration(0);
+      setCurrentTime(0);
+      setRenderedLufs(null);
+      setRenderProgress(null);
+      return;
+    }
+
+const seq = ++renderSeqRef.current;
+    setStatus('rendering');
+    setStatusMessage('Rendering native preview...');
+    setRenderProgress(0.02);
+
+void renderNativePreviewBufferFromBlob(sourceBlob, settings, (update) => {
+      if (renderSeqRef.current !== seq) return;
+      setStatusMessage(update.message);
+      setRenderProgress(Math.max(0, Math.min(1, update.progress)));
+    }).then((result) => {
+      if (renderSeqRef.current !== seq) return;
+      setOriginalBuffer(result.originalBuffer);
+      setProcessedBuffer(result.previewBuffer);
+      setDuration(result.previewBuffer.duration || result.originalBuffer.duration);
+      setCurrentTime(0);
+      currentTimeRef.current = 0;
+      pauseTimeRef.current = 0;
+      setRenderedLufs(typeof result.measuredLufs === 'number' ? result.measuredLufs : null);
+      setRmsDbOriginal(getRmsDbFromBuffer(result.originalBuffer));
+      setRmsDbProcessed(getRmsDbFromBuffer(result.previewBuffer));
+      setStatus('ready');
+      setStatusMessage('Native preview ready.');
+      setRenderProgress(1);
+    }).catch((error) => {
+      if (renderSeqRef.current !== seq) return;
+      console.error('Preview render failed:', error);
+      setStatus('error');
+      setStatusMessage(error instanceof Error ? error.message : String(error));
+      setRenderProgress(null);
+    });
+
+return () => {
+      renderSeqRef.current++;
+    };
+  }, [sourceBlob, settings]);
+
+useEffect(() => {
+    onStatusChange?.({
+      status,
+      statusMessage,
+      hasSource: !!sourceBlob,
+      hasPreview: !!processedBuffer,
+      renderProgress,
+    });
+  }, [status, statusMessage, sourceBlob, processedBuffer, renderProgress, onStatusChange]);
+
+const renderWaveformToCanvas = (buffer: AudioBuffer, canvas: HTMLCanvasElement, color: string) => {
+    const width = canvas.width;
+    const height = canvas.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#030712';
+    ctx.fillRect(0, 0, width, height);
+
+const ch0 = buffer.getChannelData(0);
+    const step = Math.max(1, Math.floor(ch0.length / width));
+    const amp = height * 0.42;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = 0; x < width; x++) {
+      let min = 1;
+      let max = -1;
+      const start = x * step;
+      const end = Math.min(start + step, ch0.length);
+      for (let i = start; i < end; i++) {
+        const v = ch0[i];
+        if (v < min) min = v;
+        if (v > max) max = v;
+      }
+      ctx.moveTo(x + 0.5, height / 2 + min * amp);
+      ctx.lineTo(x + 0.5, height / 2 + max * amp);
+    }
+    ctx.stroke();
+  };
+
+useEffect(() => {
+    if (!processedBuffer) return;
+    const width = 960;
+    const height = 180;
+    let staticCanvas = waveformStaticCanvasRef.current;
+    if (!staticCanvas) {
+      staticCanvas = document.createElement('canvas');
+      staticCanvas.width = width;
+      staticCanvas.height = height;
+      waveformStaticCanvasRef.current = staticCanvas;
+    }
+    staticCanvas.width = width;
+    staticCanvas.height = height;
+    renderWaveformToCanvas(processedBuffer, staticCanvas, '#34d399');
+  }, [processedBuffer]);
+
+useEffect(() => {
+    if (!originalBuffer) return;
+    const width = 960;
+    const height = 180;
+    let originalCanvas = waveformOriginalStaticRef.current;
+    if (!originalCanvas) {
+      originalCanvas = document.createElement('canvas');
+      originalCanvas.width = width;
+      originalCanvas.height = height;
+      waveformOriginalStaticRef.current = originalCanvas;
+    }
+    originalCanvas.width = width;
+    originalCanvas.height = height;
+    renderWaveformToCanvas(originalBuffer, originalCanvas, '#94a3b8');
+  }, [originalBuffer]);
+
+useEffect(() => {
+    const canvas = waveformCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const width = canvas.width;
+    const height = canvas.height;
+
+ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#030712';
+    ctx.fillRect(0, 0, width, height);
+
+const sourceCanvas = bypassFx 
+      ? waveformOriginalStaticRef.current 
+      : waveformStaticCanvasRef.current;
+    
+    if (sourceCanvas) {
+      ctx.drawImage(sourceCanvas, 0, 0);
+    }
+  }, [bypassFx]);
+
+useEffect(() => {
+    const canvas = waveformCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const width = canvas.width;
+    const height = canvas.height;
+
+ctx.clearRect(0, 0, width, height);
+    ctx.fillStyle = '#030712';
+    ctx.fillRect(0, 0, width, height);
+
+if (waveformStaticCanvasRef.current) {
+      ctx.drawImage(waveformStaticCanvasRef.current, 0, 0);
+    }
+
+const progressX = duration > 0 ? (currentTime / duration) * width : 0;
+    ctx.strokeStyle = '#f8fafc';
+    ctx.beginPath();
+    ctx.moveTo(progressX, 0);
+    ctx.lineTo(progressX, height);
+    ctx.stroke();
+  }, [currentTime, duration, activeBuffer]);
+
+const ensureAudioGraph = async () => {
+    const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+    if (!audioCtxRef.current) {
+      const ctx = new AudioContextCtor();
+      const gain = ctx.createGain();
+      const splitter = ctx.createChannelSplitter(2);
+      const analyserL = ctx.createAnalyser();
+      const analyserR = ctx.createAnalyser();
+      analyserL.fftSize = 2048;
+      analyserR.fftSize = 2048;
+      gain.connect(splitter);
+      splitter.connect(analyserL, 0);
+      splitter.connect(analyserR, 1);
+      gain.connect(ctx.destination);
+      audioCtxRef.current = ctx;
+      gainRef.current = gain;
+      splitterRef.current = splitter;
+      analyserLRef.current = analyserL;
+      analyserRRef.current = analyserR;
+    }
+    if (audioCtxRef.current.state === 'suspended') {
+      await audioCtxRef.current.resume();
+    }
+    return audioCtxRef.current;
+  };
+
+const stopPlayback = () => {
+    transportSeqRef.current += 1;
+    if (sourceNodeRef.current) {
+      try { sourceNodeRef.current.stop(); } catch {}
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+    setIsPlaying(false);
+    isPlayingRef.current = false;
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = null;
+    }
+  };
+
+const disposeAudioGraph = () => {
+    const ctx = audioCtxRef.current;
+    audioCtxRef.current = null;
+    sourceNodeRef.current = null;
+    analyserLRef.current = null;
+    analyserRRef.current = null;
+    gainRef.current = null;
+    splitterRef.current = null;
+    if (ctx && ctx.state !== 'closed') {
+      void ctx.close().catch(() => {});
+    }
+  };
+
+const tickMeters = () => {
+    const ctx = audioCtxRef.current;
+    const analyserL = analyserLRef.current;
+    const analyserR = analyserRRef.current;
+    if (!ctx || !analyserL || !analyserR) return;
+
+const dataL = new Float32Array(analyserL.fftSize);
+    const dataR = new Float32Array(analyserR.fftSize);
+    analyserL.getFloatTimeDomainData(dataL);
+    analyserR.getFloatTimeDomainData(dataR);
+    const nextMeterL = getPeakDbFromFloatTimeDomain(dataL);
+    const nextMeterR = getPeakDbFromFloatTimeDomain(dataR);
+    const nextRmsL = getRmsDbFromFloatTimeDomain(dataL);
+    const nextRmsR = getRmsDbFromFloatTimeDomain(dataR);
+    const nextTruePeak = estimateTruePeakDb(dataL, dataR);
+    const nextPeakHoldL = Math.max(peakHoldLRef.current - 0.15, nextMeterL);
+    const nextPeakHoldR = Math.max(peakHoldRRef.current - 0.15, nextMeterR);
+    const nextTruePeakHold = Math.max(truePeakHoldDbRef.current - 0.15, nextTruePeak);
+    const nextOverloaded = nextTruePeak >= -0.1 || nextMeterL >= -0.1 || nextMeterR >= -0.1;
+    peakHoldLRef.current = nextPeakHoldL;
+    peakHoldRRef.current = nextPeakHoldR;
+    truePeakHoldDbRef.current = nextTruePeakHold;
+    isOverloadedRef.current = nextOverloaded;
+    setMeterL(nextMeterL);
+    setMeterR(nextMeterR);
+    setLiveRmsL(nextRmsL);
+    setLiveRmsR(nextRmsR);
+    setPeakHoldL(nextPeakHoldL);
+    setPeakHoldR(nextPeakHoldR);
+    setTruePeakDb(nextTruePeak);
+    setTruePeakHoldDb(nextTruePeakHold);
+    setIsOverloaded(nextOverloaded);
+
+if (isPlayingRef.current) {
+      const nextTime = Math.min(durationRef.current, Math.max(0, ctx.currentTime - startTimeRef.current));
+      if (Math.random() < 0.02) {
+        const analyserRmsL = getRmsDbFromFloatTimeDomain(dataL);
+        const analyserRmsR = getRmsDbFromFloatTimeDomain(dataR);
+        const bufferRms = activeBuffer ? getRmsDbWindowFromBuffer(activeBuffer, nextTime, 0.5) : null;
+        const gain = gainRef.current?.gain.value ?? null;
+        
+        // Direct sample check at current time
+        let directSampleL = null;
+        if (activeBuffer && nextTime < activeBuffer.duration) {
+          const sampleIndex = Math.floor(nextTime * activeBuffer.sampleRate);
+          if (sampleIndex < activeBuffer.length) {
+            directSampleL = activeBuffer.getChannelData(0)[sampleIndex];
+          }
+        }
+        
+        // Compare: analyser should be within ~6dB of buffer RMS (due to different window sizes)
+        const delta = bufferRms != null && Number.isFinite(bufferRms) && Number.isFinite(analyserRmsL) 
+          ? (analyserRmsL - bufferRms).toFixed(1) 
+          : 'N/A';
+        
+        console.log('[DEBUG PLAYBACK]', {
+          ctxTime: ctx.currentTime.toFixed(2),
+          calculatedTime: nextTime.toFixed(2),
+          analyserRmsL: analyserRmsL.toFixed(1),
+          analyserRmsR: analyserRmsR.toFixed(1),
+          bufferRms: bufferRms?.toFixed(1),
+          directSampleL: directSampleL?.toFixed(6) ?? 'null',
+          delta: delta + ' dB',
+          gainValue: gain?.toFixed(4) ?? 'null',
+        });
+      }
+      currentTimeRef.current = nextTime;
+      pauseTimeRef.current = nextTime;
+      setCurrentTime(nextTime);
+      if (activeBuffer) {
+        setDebugBufferRmsAtPlayhead(getRmsDbWindowFromBuffer(activeBuffer, nextTime, 0.5));
+      }
+      if (originalBuffer) {
+        setDebugSourceRmsAtPlayhead(getRmsDbWindowFromBuffer(originalBuffer, nextTime, 0.5));
+      }
+      if (processedBuffer) {
+        setDebugPreviewRmsAtPlayhead(getRmsDbWindowFromBuffer(processedBuffer, nextTime, 0.5));
+      }
+    }
+
+const canvas = meterCanvasRef.current;
+    const c = canvas?.getContext('2d');
+    if (canvas && c) {
+      const w = canvas.width;
+      const h = canvas.height;
+      c.clearRect(0, 0, w, h);
+      c.fillStyle = '#020617';
+      c.fillRect(0, 0, w, h);
+      const map = (db: number) => {
+        const normalized = Math.max(0, Math.min(1, (db + 48) / 48));
+        return normalized * (w - 8);
+      };
+      const leftW = map(nextMeterL);
+      const rightW = map(nextMeterR);
+      const leftHold = map(nextPeakHoldL);
+      const rightHold = map(nextPeakHoldR);
+      c.fillStyle = '#22c55e';
+      c.fillRect(4, 6, leftW, 10);
+      c.fillStyle = '#38bdf8';
+      c.fillRect(4, 22, rightW, 10);
+      c.fillStyle = '#f8fafc';
+      c.fillRect(4 + leftHold, 5, 2, 12);
+      c.fillRect(4 + rightHold, 21, 2, 12);
+      if (nextOverloaded) {
+        c.fillStyle = '#7f1d1d';
+        c.fillRect(w - 64, 4, 56, h - 8);
+        c.fillStyle = '#fecaca';
+        c.font = 'bold 12px sans-serif';
+        c.fillText('CLIP', w - 51, 26);
+      }
+    }
+
+const spectrumCanvas = spectrumCanvasRef.current;
+    const sctx = spectrumCanvas?.getContext('2d');
+    if (showSpectrumRef.current && spectrumCanvas && sctx) {
+      const w = spectrumCanvas.width;
+      const h = spectrumCanvas.height;
+      sctx.fillStyle = '#020617';
+      sctx.fillRect(0, 0, w, h);
+
+const freqL = new Uint8Array(analyserL.frequencyBinCount);
+      const freqR = new Uint8Array(analyserR.frequencyBinCount);
+      analyserL.getByteFrequencyData(freqL);
+      analyserR.getByteFrequencyData(freqR);
+
+const bars = 96;
+      const binStep = Math.max(1, Math.floor(freqL.length / bars));
+      const barWidth = w / bars;
+      for (let i = 0; i < bars; i++) {
+        let sumL = 0;
+        let sumR = 0;
+        for (let j = 0; j < binStep; j++) {
+          const idx = Math.min(freqL.length - 1, i * binStep + j);
+          sumL += freqL[idx];
+          sumR += freqR[idx];
+        }
+        const avg = ((sumL + sumR) / 2) / binStep;
+        const normalized = avg / 255;
+        const bh = Math.max(1, normalized * (h - 4));
+        const x = i * barWidth;
+        const hue = 180 - Math.round((i / bars) * 120);
+        sctx.fillStyle = `hsla(${hue}, 90%, 60%, 0.95)`;
+        sctx.fillRect(x + 1, h - bh - 2, Math.max(1, barWidth - 2), bh);
+      }
+    }
+
+if (isPlayingRef.current) {
+      rafRef.current = requestAnimationFrame(tickMeters);
+    }
+  };
+
+const playFrom = async (time: number) => {
+    const buffer = activeBuffer;
+    if (!buffer) return false;
+
+const requestId = transportSeqRef.current + 1;
+    stopPlayback();
+    disposeAudioGraph();
+    transportSeqRef.current = requestId;
+    const ctx = await ensureAudioGraph();
+    if (transportSeqRef.current !== requestId) return false;
+    console.log('[DEBUG PLAYBACK] Starting playFrom', {
+      time,
+      bufferDuration: buffer.duration,
+      bufferSampleRate: buffer.sampleRate,
+      bufferLength: buffer.length,
+      bufferChannels: buffer.numberOfChannels,
+      bypassFx,
+    });
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    applyOutputGain();
+    source.connect(gainRef.current!);
+    source.onended = () => {
+      if (sourceNodeRef.current !== source) return;
+      sourceNodeRef.current = null;
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      pauseTimeRef.current = Math.min(buffer.duration, Math.max(0, ctx.currentTime - startTimeRef.current));
+      currentTimeRef.current = pauseTimeRef.current;
+      setCurrentTime(pauseTimeRef.current);
+      setStatus((s) => (s === 'error' ? s : 'ready'));
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+    sourceNodeRef.current = source;
+    const startAt = Math.min(Math.max(0, time), Math.max(0, buffer.duration - 0.01));
+    startTimeRef.current = ctx.currentTime - startAt;
+    pauseTimeRef.current = startAt;
+    currentTimeRef.current = startAt;
+    setCurrentTime(startAt);
+    source.start(0, startAt);
+    setIsPlaying(true);
+    isPlayingRef.current = true;
+    rafRef.current = requestAnimationFrame(tickMeters);
+    return true;
+  };
+
+const handlePlayPause = async () => {
+    if (!activeBuffer) return;
+    if (isPlaying) {
+      const ctx = audioCtxRef.current;
+      if (ctx) pauseTimeRef.current = Math.max(0, ctx.currentTime - startTimeRef.current);
+      stopPlayback();
+      disposeAudioGraph();
+      setStatus((s) => (s === 'error' ? s : 'paused'));
+      return;
+    }
+    const started = await playFrom(pauseTimeRef.current || 0);
+    if (started) {
+      setStatus((s) => (s === 'error' ? s : 'playing'));
+    }
+  };
+
+const handleStop = () => {
+    pauseTimeRef.current = 0;
+    setCurrentTime(0);
+    currentTimeRef.current = 0;
+    stopPlayback();
+    setStatus((s) => (s === 'error' ? s : activeBuffer ? 'ready' : 'idle'));
+  };
+
+const handleSeek = async (value: number) => {
+    pauseTimeRef.current = value;
+    setCurrentTime(value);
+    currentTimeRef.current = value;
+    if (isPlaying) await playFrom(value);
+  };
+
+useEffect(() => {
+    stopPlayback();
+    disposeAudioGraph();
+    pauseTimeRef.current = 0;
+    setCurrentTime(0);
+    currentTimeRef.current = 0;
+    setIsPlaying(false);
+    setMeterL(-Infinity);
+    setMeterR(-Infinity);
+    setLiveRmsL(-Infinity);
+    setLiveRmsR(-Infinity);
+    setPeakHoldL(-Infinity);
+    setPeakHoldR(-Infinity);
+    setTruePeakDb(-Infinity);
+    setTruePeakHoldDb(-Infinity);
+    setIsOverloaded(false);
+    setDebugBufferRmsAtPlayhead(null);
+    setDebugSourceRmsAtPlayhead(null);
+    setDebugPreviewRmsAtPlayhead(null);
+    peakHoldLRef.current = -Infinity;
+    peakHoldRRef.current = -Infinity;
+    truePeakHoldDbRef.current = -Infinity;
+    isOverloadedRef.current = false;
+  }, [originalBuffer, processedBuffer]);
+
+useEffect(() => {
+    applyOutputGain();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levelMatchEnabled, rmsDbOriginal, rmsDbProcessed, bypassFx]);
+
+useEffect(() => {
+    if (!isPlaying || !originalBuffer || !processedBuffer) return;
+    const currentPosition = currentTimeRef.current || pauseTimeRef.current || 0;
+    const requestId = transportSeqRef.current + 1;
+    if (sourceNodeRef.current) {
+      try { sourceNodeRef.current.stop(); } catch {}
+      sourceNodeRef.current.disconnect();
+      sourceNodeRef.current = null;
+    }
+    transportSeqRef.current = requestId;
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    const source = ctx.createBufferSource();
+    source.buffer = activeBuffer;
+    applyOutputGain();
+    source.connect(gainRef.current!);
+    source.onended = () => {
+      if (sourceNodeRef.current !== source) return;
+      sourceNodeRef.current = null;
+      setIsPlaying(false);
+      isPlayingRef.current = false;
+      pauseTimeRef.current = Math.min(activeBuffer.duration, Math.max(0, ctx.currentTime - startTimeRef.current));
+      currentTimeRef.current = pauseTimeRef.current;
+      setCurrentTime(pauseTimeRef.current);
+      setStatus((s) => (s === 'error' ? s : 'ready'));
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+    sourceNodeRef.current = source;
+    const startAt = Math.min(Math.max(0, currentPosition), Math.max(0, activeBuffer.duration - 0.01));
+    startTimeRef.current = ctx.currentTime - startAt;
+    pauseTimeRef.current = startAt;
+    currentTimeRef.current = startAt;
+    setCurrentTime(startAt);
+    source.start(0, startAt);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bypassFx]);
+
+const statusTone =
+    status === 'error'
+      ? 'border-red-700/60 bg-red-950/30 text-red-200'
+      : status === 'rendering'
+        ? 'border-blue-700/60 bg-blue-950/30 text-blue-200'
+        : status === 'ready' || status === 'playing' || status === 'paused'
+          ? 'border-emerald-700/60 bg-emerald-950/20 text-emerald-200'
+          : 'border-slate-700 bg-slate-900/40 text-slate-300';
+  const statusLabel =
+    status === 'rendering'
+      ? 'Preparing Preview'
+      : status === 'ready'
+        ? 'Preview Ready'
+        : status === 'playing'
+          ? 'Preview Playing'
+          : status === 'paused'
+            ? 'Preview Paused'
+            : status === 'error'
+              ? 'Preview Error'
+              : 'Awaiting Source';
+  const previewVsSourceDeltaAtPlayhead =
+    debugPreviewRmsAtPlayhead != null &&
+    debugSourceRmsAtPlayhead != null &&
+    Number.isFinite(debugPreviewRmsAtPlayhead) &&
+    Number.isFinite(debugSourceRmsAtPlayhead)
+      ? debugPreviewRmsAtPlayhead - debugSourceRmsAtPlayhead
+      : null;
+
+return (
+    <div className="rounded-xl border border-slate-800 bg-slate-950/50 p-4 space-y-3">
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Native Preview / Analysis</h3>
+          <p className="text-sm text-slate-400">
+            React transport + waveform + meters + bypass/level-match using W-A-M worker preview render.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-xs">
+          <button type="button" onClick={() => setShowSpectrum((v) => !v)} className={`px-3 py-1.5 rounded-lg border ${showSpectrum ? 'border-cyan-500 text-cyan-300' : 'border-slate-700 text-slate-300'}`}>{showSpectrum ? 'Spectrum On' : 'Spectrum Off'}</button>
+          <button type="button" onClick={() => setBypassFx(false)} className={`px-3 py-1.5 rounded-lg border ${!bypassFx ? 'border-emerald-500 text-emerald-300' : 'border-slate-700 text-slate-300'}`}>FX On</button>
+          <button type="button" onClick={() => setBypassFx(true)} className={`px-3 py-1.5 rounded-lg border ${bypassFx ? 'border-slate-300 text-white' : 'border-slate-700 text-slate-300'}`}>Bypass</button>
+          <button type="button" onClick={() => setLevelMatchEnabled((v) => !v)} className={`px-3 py-1.5 rounded-lg border ${levelMatchEnabled ? 'border-violet-500 text-violet-300' : 'border-slate-700 text-slate-300'}`}>Lvl Match {levelMatchEnabled ? 'On' : 'Off'}</button>
+        </div>
+      </div>
+
+<div className={`rounded-lg border px-3 py-3 ${statusTone}`}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {status === 'rendering' && (
+              <span className="inline-block h-3.5 w-3.5 rounded-full border-2 border-current border-t-transparent animate-spin" />
+            )}
+            <span className="text-sm font-semibold">{statusLabel}</span>
+          </div>
+          {typeof renderProgress === 'number' && status === 'rendering' && (
+            <span className="text-xs tabular-nums">{Math.round(renderProgress * 100)}%</span>
+          )}
+        </div>
+        <div className="mt-1 text-xs opacity-90">
+          {statusMessage || (sourceBlob ? 'Preparing preview analysis and playback buffer...' : 'Select or upload a source to build the native preview.')}
+        </div>
+        {typeof renderProgress === 'number' && status === 'rendering' && (
+          <div className="mt-2 h-1.5 rounded-full bg-slate-900/70 overflow-hidden">
+            <div
+              className="h-full bg-gradient-to-r from-blue-400 to-cyan-300 transition-[width] duration-200"
+              style={{ width: `${Math.max(2, Math.round(renderProgress * 100))}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+<div className="text-xs text-slate-400 flex flex-wrap gap-4">
+        <span>Source: {sourceFileName || 'No source selected'}</span>
+        <span>Status: {statusMessage || status}</span>
+        <span>LUFS: {renderedLufs == null ? '--' : renderedLufs.toFixed(1)}</span>
+        <span>Src Dur: {originalBuffer ? formatTime(originalBuffer.duration) : '--'}</span>
+        <span>Preview Dur: {processedBuffer ? formatTime(processedBuffer.duration) : '--'}</span>
+        <span>Ctx SR: {audioCtxRef.current?.sampleRate || '--'} Hz</span>
+        <span>Buf SR: {activeBuffer?.sampleRate || '--'} Hz</span>
+        <span>True Peak: {Number.isFinite(truePeakHoldDb) ? `${truePeakHoldDb.toFixed(1)} dBTP` : '--'}</span>
+        <span className={isOverloaded ? 'text-red-300' : 'text-slate-400'}>{isOverloaded ? 'Overload Detected' : 'No Clip'}</span>
+      </div>
+
+{diagnostics.length > 0 && (
+        <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+          <div className="text-xs font-semibold text-slate-200 mb-2">Source vs Preview Diagnostics (RMS)</div>
+          <div className="grid grid-cols-3 gap-2 text-[11px] text-slate-300">
+            <div className="text-slate-400">Checkpoint</div>
+            <div className="text-slate-400">Source</div>
+            <div className="text-slate-400">Preview</div>
+            {diagnostics.map((d) => (
+              <React.Fragment key={d.sec}>
+                <div>{formatTime(d.sec)}</div>
+                <div>{d.sourceDb == null ? '--' : Number.isFinite(d.sourceDb) ? `${d.sourceDb.toFixed(1)} dB` : '-∞ dB'}</div>
+                <div>{d.previewDb == null ? '--' : Number.isFinite(d.previewDb) ? `${d.previewDb.toFixed(1)} dB` : '-∞ dB'}</div>
+              </React.Fragment>
+            ))}
+          </div>
+          <div className="mt-2 text-[11px] text-slate-500">
+            If Source and Preview both fall the same way, the loaded source audio already contains the fade. If only Preview falls, the render pipeline is causing it.
+          </div>
+        </div>
+      )}
+
+<div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+        <div className="text-xs font-semibold text-slate-200 mb-2">Live Playback Probe</div>
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-2 text-[11px] text-slate-300">
+          <div>
+            <div className="text-slate-500">Mode</div>
+            <div>{bypassFx ? 'Bypass (Source)' : 'FX On (Preview)'}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Gain</div>
+            <div>{gainRef.current ? `${gainRef.current.gain.value.toFixed(3)}x` : '--'}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Analyser RMS L/R</div>
+            <div>{Number.isFinite(liveRmsL) ? liveRmsL.toFixed(1) : '-∞'} / {Number.isFinite(liveRmsR) ? liveRmsR.toFixed(1) : '-∞'} dB</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Buffer RMS @ Playhead</div>
+            <div>{debugBufferRmsAtPlayhead == null ? '--' : Number.isFinite(debugBufferRmsAtPlayhead) ? `${debugBufferRmsAtPlayhead.toFixed(1)} dB` : '-∞ dB'}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Source RMS @ Playhead</div>
+            <div>{debugSourceRmsAtPlayhead == null ? '--' : Number.isFinite(debugSourceRmsAtPlayhead) ? `${debugSourceRmsAtPlayhead.toFixed(1)} dB` : '-∞ dB'}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Preview RMS @ Playhead</div>
+            <div>{debugPreviewRmsAtPlayhead == null ? '--' : Number.isFinite(debugPreviewRmsAtPlayhead) ? `${debugPreviewRmsAtPlayhead.toFixed(1)} dB` : '-∞ dB'}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">Preview-Source Δ</div>
+            <div>{previewVsSourceDeltaAtPlayhead == null ? '--' : `${previewVsSourceDeltaAtPlayhead >= 0 ? '+' : ''}${previewVsSourceDeltaAtPlayhead.toFixed(1)} dB`}</div>
+          </div>
+          <div>
+            <div className="text-slate-500">AudioContext</div>
+            <div>{audioCtxRef.current?.state || '--'}</div>
+          </div>
+        </div>
+      </div>
+
+<div className="rounded-lg border border-slate-800 overflow-hidden bg-slate-950 relative">
+        <canvas ref={waveformCanvasRef} width={960} height={180} className="w-full h-40 block" />
+        {(status === 'rendering' || !activeBuffer) && (
+          <div className="absolute inset-0 grid place-items-center bg-slate-950/70">
+            <div className="text-center px-4">
+              {status === 'rendering' ? (
+                <>
+                  <div className="mx-auto mb-2 h-5 w-5 rounded-full border-2 border-blue-300 border-t-transparent animate-spin" />
+                  <div className="text-sm text-blue-200 font-medium">Rendering preview waveform + analysis</div>
+                </>
+              ) : (
+                <div className="text-sm text-slate-400">Waveform appears once a source is loaded and analyzed.</div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+<div className="rounded-lg border border-slate-800 overflow-hidden bg-slate-950">
+        <canvas ref={meterCanvasRef} width={960} height={38} className="w-full h-10 block" />
+      </div>
+
+{showSpectrum && (
+        <div className="rounded-lg border border-slate-800 overflow-hidden bg-slate-950">
+          <canvas ref={spectrumCanvasRef} width={960} height={140} className="w-full h-28 block" />
+        </div>
+      )}
+
+<div className="grid grid-cols-1 md:grid-cols-[auto_auto_auto_1fr_auto] gap-2 items-center">
+        <button type="button" onClick={handlePlayPause} disabled={!activeBuffer || status === 'rendering'} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 text-white text-sm">
+          {isPlaying ? 'Pause' : 'Play'}
+        </button>
+        <button type="button" onClick={handleStop} disabled={!activeBuffer} className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 disabled:bg-slate-900 text-white text-sm">
+          Stop
+        </button>
+        <div className="text-xs text-slate-300">
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={duration || 0}
+          step={0.01}
+          value={Math.min(currentTime, duration || 0)}
+          onChange={(e) => void handleSeek(Number(e.target.value))}
+          disabled={!activeBuffer}
+          className="w-full"
+        />
+        <div className="text-xs text-slate-400 whitespace-nowrap">
+          L {Number.isFinite(meterL) ? meterL.toFixed(1) : '-∞'} dB (pk {Number.isFinite(peakHoldL) ? peakHoldL.toFixed(1) : '-∞'}) | R {Number.isFinite(meterR) ? meterR.toFixed(1) : '-∞'} dB (pk {Number.isFinite(peakHoldR) ? peakHoldR.toFixed(1) : '-∞'}) | TP {Number.isFinite(truePeakDb) ? truePeakDb.toFixed(1) : '-∞'} dBTP
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default WebAudioMasterNativePreview;
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/ProviderSettingsModal.tsx ---
+import React, { useState, useEffect, useRef } from 'react';
+import { AIProviderConfig, ProviderType } from '../types';
+import { createProvider, getDefaultModelForProvider } from '../services/providers/providerFactory';
+import { ApiKeyStorageMode } from '../utils/apiKeyStorage';
+
+interface ProviderSettingsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSave: (config: AIProviderConfig, storageMode: ApiKeyStorageMode) => Promise<void> | void;
+  initialConfig: AIProviderConfig;
+  initialStorageMode: ApiKeyStorageMode;
+  isEmbedded?: boolean;
+}
+
+export const ProviderSettingsModal: React.FC<ProviderSettingsModalProps> = ({
+  isOpen,
+  onClose,
+  onSave,
+  initialConfig,
+  initialStorageMode,
+  isEmbedded = false,
+}) => {
+  const [config, setConfig] = useState<AIProviderConfig>(initialConfig);
+  const [storageMode, setStorageMode] = useState<ApiKeyStorageMode>(initialStorageMode);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isFetchingModels, setIsFetchingModels] = useState(false);
+  const [modelFetchError, setModelFetchError] = useState<string | null>(null);
+  const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
+  const [modelSearchQuery, setModelSearchQuery] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  
+  const modelDropdownRef = useRef<HTMLDivElement>(null);
+  const modelSearchInputRef = useRef<HTMLInputElement>(null);
+
+useEffect(() => {
+    if (isOpen) {
+      setConfig(initialConfig);
+      setStorageMode(initialStorageMode);
+      setAvailableModels([]);
+      setModelFetchError(null);
+      setIsModelDropdownOpen(false);
+      setModelSearchQuery('');
+      setSaveError(null);
+    }
+  }, [isOpen, initialConfig, initialStorageMode]);
+
+useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
+        setIsModelDropdownOpen(false);
+        setModelSearchQuery('');
+      }
+    };
+
+if (isModelDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+
+return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isModelDropdownOpen]);
+
+useEffect(() => {
+    if (isModelDropdownOpen && modelSearchInputRef.current) {
+      setTimeout(() => {
+        modelSearchInputRef.current?.focus();
+      }, 10);
+    } else if (!isModelDropdownOpen) {
+      setModelSearchQuery('');
+    }
+  }, [isModelDropdownOpen]);
+
+const handleFetchModels = async () => {
+    if (!config.apiKey && config.type !== 'openapi') {
+      setModelFetchError('API key is required to fetch models');
+      return;
+    }
+
+setIsFetchingModels(true);
+    setModelFetchError(null);
+
+try {
+      const provider = createProvider(config);
+      const models = await provider.getAvailableModels();
+      setAvailableModels(models);
+      if (models.length === 0) {
+        setModelFetchError('No models found. Check your API key and endpoint configuration.');
+      }
+    } catch (error: any) {
+      console.error('Failed to fetch models:', error);
+      setModelFetchError(error.message || 'Failed to fetch models. Check your configuration.');
+    } finally {
+      setIsFetchingModels(false);
+    }
+  };
+
+const fuzzyMatch = (text: string, query: string): boolean => {
+    if (!query) return true;
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    
+    if (lowerText.includes(lowerQuery)) return true;
+    
+    let queryIndex = 0;
+    for (let i = 0; i < lowerText.length && queryIndex < lowerQuery.length; i++) {
+      if (lowerText[i] === lowerQuery[queryIndex]) {
+        queryIndex++;
+      }
+    }
+    return queryIndex === lowerQuery.length;
+  };
+
+const filteredModels = availableModels.filter(model => 
+    fuzzyMatch(model, modelSearchQuery)
+  );
+
+const handleModelSelect = (model: string) => {
+    setConfig({ ...config, model });
+    setIsModelDropdownOpen(false);
+    setModelSearchQuery('');
+  };
+
+const handleSave = async () => {
+    setSaveError(null);
+    setIsSaving(true);
+
+const configToSave = {
+      ...config,
+      baseUrl: config.baseUrl ? config.baseUrl.replace(/\/+$/, '') : config.baseUrl,
+    };
+
+try {
+      await onSave(configToSave, storageMode);
+      onClose();
+    } catch (error: any) {
+      setSaveError(error?.message || 'Failed to save provider settings');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+if (!isOpen) return null;
+
+const content = (
+    <div className={`${isEmbedded ? 'h-full flex flex-col' : 'bg-[var(--app-panel)] rounded-xl p-6 max-w-2xl w-full border border-[var(--app-panel-border)] shadow-2xl max-h-[90vh] overflow-y-auto'}`}>
+      {!isEmbedded && (
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-white">AI Provider Settings</h2>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-white transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+      )}
+      
+      {isEmbedded && <h3 className="text-lg font-bold text-white mb-6 p-6 pb-0">AI Provider Settings</h3>}
+
+<div className={`space-y-4 ${isEmbedded ? 'p-6 flex-grow overflow-y-auto custom-scrollbar' : ''}`}>
+        <div>
+          <label className="block text-sm font-semibold text-slate-400 mb-2">
+            Provider Type
+            </label>
+            <select
+              value={config.type}
+              onChange={(e) => {
+                const newType = e.target.value as ProviderType;
+                setConfig({ 
+                  ...config, 
+                  type: newType,
+                  model: getDefaultModelForProvider(newType),
+                  baseUrl: newType === 'openapi' ? config.baseUrl : undefined,
+                  authHeader: newType === 'openapi' ? (config.authHeader || 'Authorization') : undefined,
+                  authPrefix: newType === 'openapi' ? (config.authPrefix || 'Bearer ') : undefined,
+                });
+                setAvailableModels([]);
+                setModelFetchError(null);
+              }}
+              className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50"
+            >
+              <option value="gemini">Google Gemini</option>
+              <option value="openrouter">OpenRouter</option>
+              <option value="openapi">Custom OpenAPI</option>
+            </select>
+          </div>
+
+<div>
+            <label className="block text-sm font-semibold text-slate-400 mb-2">
+              API Key {config.type === 'openapi' && '(Optional if using custom auth)'}
+            </label>
+            <input
+              type="password"
+              value={config.apiKey || ''}
+              onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
+              className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50"
+              placeholder="Enter API key"
+            />
+          </div>
+
+<div>
+            <label className="block text-sm font-semibold text-slate-400 mb-2">
+              API Key Storage
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => setStorageMode('client')}
+                className={`px-3 py-2 rounded-lg text-xs border transition-colors ${
+                  storageMode === 'client'
+                    ? 'bg-[var(--app-accent)]/20 border-purple-500 text-purple-200'
+                    : 'bg-slate-900 border-[var(--app-panel-border)] text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                Client only
+              </button>
+              <button
+                type="button"
+                onClick={() => setStorageMode('server')}
+                className={`px-3 py-2 rounded-lg text-xs border transition-colors ${
+                  storageMode === 'server'
+                    ? 'bg-[var(--app-accent)]/20 border-purple-500 text-purple-200'
+                    : 'bg-slate-900 border-[var(--app-panel-border)] text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                Server only
+              </button>
+              <button
+                type="button"
+                onClick={() => setStorageMode('both')}
+                className={`px-3 py-2 rounded-lg text-xs border transition-colors ${
+                  storageMode === 'both'
+                    ? 'bg-[var(--app-accent)]/20 border-purple-500 text-purple-200'
+                    : 'bg-slate-900 border-[var(--app-panel-border)] text-slate-300 hover:border-slate-600'
+                }`}
+              >
+                Client + server
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Server mode stores an encrypted key in your account vault and requires auth.
+            </p>
+          </div>
+
+{config.type === 'openapi' && (
+            <>
+              <div>
+                <label className="block text-sm font-semibold text-slate-400 mb-2">
+                  Base URL
+                </label>
+                <input
+                  type="text"
+                  value={config.baseUrl || ''}
+                  onChange={(e) => {
+                    let value = e.target.value.trim();
+                    value = value.replace(/\/+$/, '');
+                    setConfig({ ...config, baseUrl: value });
+                  }}
+                  onBlur={(e) => {
+                    let value = e.target.value.trim();
+                    value = value.replace(/\/+$/, '');
+                    if (value !== config.baseUrl) {
+                      setConfig({ ...config, baseUrl: value });
+                    }
+                  }}
+                  className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50"
+                  placeholder="https://api.example.com/v1"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Base URL for your OpenAPI-compatible endpoint (e.g., http://localhost:8000). Trailing slashes are automatically removed.
+                </p>
+              </div>
+
+<div>
+                <label className="block text-sm font-semibold text-slate-400 mb-2">
+                  Auth Header Name
+                </label>
+                <input
+                  type="text"
+                  value={config.authHeader || 'Authorization'}
+                  onChange={(e) => setConfig({ ...config, authHeader: e.target.value })}
+                  className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50"
+                  placeholder="Authorization or x-litellm-api-key"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Header name for authentication (e.g., "Authorization", "x-litellm-api-key")
+                </p>
+              </div>
+
+<div>
+                <label className="block text-sm font-semibold text-slate-400 mb-2">
+                  Auth Prefix
+                </label>
+                <input
+                  type="text"
+                  value={config.authPrefix || 'Bearer '}
+                  onChange={(e) => setConfig({ ...config, authPrefix: e.target.value })}
+                  className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50"
+                  placeholder="Bearer "
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Prefix for auth header value (e.g., "Bearer ", "ApiKey ", or leave empty)
+                </p>
+              </div>
+            </>
+          )}
+
+<div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-semibold text-slate-400">
+                Model
+              </label>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleFetchModels();
+                }}
+                disabled={isFetchingModels || (config.type !== 'openapi' && !config.apiKey)}
+                className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isFetchingModels ? 'Fetching...' : 'Fetch Models'}
+              </button>
+            </div>
+            
+            {availableModels.length > 0 ? (
+              <div className="relative" ref={modelDropdownRef}>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setIsModelDropdownOpen(!isModelDropdownOpen);
+                  }}
+                  className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50 flex items-center justify-between text-left"
+                >
+                  <span className="truncate">
+                    {config.model || 'Select a model...'}
+                  </span>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`w-4 h-4 transition-transform flex-shrink-0 ${isModelDropdownOpen ? 'rotate-180' : ''}`}
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </button>
+
+{isModelDropdownOpen && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-lg shadow-xl z-50 flex flex-col max-h-60">
+                    <div className="p-2 border-b border-[var(--app-panel-border)]">
+                      <input
+                        ref={modelSearchInputRef}
+                        type="text"
+                        value={modelSearchQuery}
+                        onChange={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          setModelSearchQuery(e.target.value);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            if (filteredModels.length > 0) {
+                              handleModelSelect(filteredModels[0]);
+                            }
+                          }
+                          if (e.key === 'Escape') {
+                            setIsModelDropdownOpen(false);
+                            setModelSearchQuery('');
+                          }
+                        }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
+                        placeholder="Search models..."
+                        className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50"
+                      />
+                    </div>
+                    
+                    <div className="overflow-y-auto max-h-48">
+                      {filteredModels.length > 0 ? (
+                        filteredModels.map((model) => (
+                          <button
+                            key={model}
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleModelSelect(model);
+                            }}
+                            className={`w-full text-left px-3 py-2 text-sm font-medium transition-colors flex items-center justify-between hover:bg-[var(--app-tab-hover)]/50
+                              ${config.model === model
+                                ? 'bg-[var(--app-accent)]/20 text-purple-300'
+                                : 'text-slate-300 hover:text-white'
+                              }`}
+                          >
+                            <span className="truncate">{model}</span>
+                            {config.model === model && (
+                              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-[var(--app-accent)] flex-shrink-0">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-slate-400 text-center">
+                          No models match "{modelSearchQuery}"
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={config.model || ''}
+                onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                className="w-full bg-slate-900 border border-[var(--app-panel-border)] rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-[var(--app-accent)]/50"
+                placeholder={config.type === 'gemini' ? 'gemini-3-flash-preview' : 'Enter model name'}
+              />
+            )}
+
+{modelFetchError && (
+              <p className="text-xs text-red-400 mt-1">{modelFetchError}</p>
+            )}
+
+{config.type === 'gemini' && !availableModels.length && (
+              <p className="text-xs text-slate-500 mt-1">
+                Common models: gemini-3-flash-preview, gemini-2.5-flash, gemini-1.5-pro
+              </p>
+            )}
+          </div>
+        </div>
+
+<div className={`flex gap-3 justify-end mt-6 pt-4 border-t border-[var(--app-panel-border)] ${isEmbedded ? 'p-6 pb-6 pt-4' : ''}`}>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onClose();
+            }}
+            className="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
+          >
+            Cancel
+          </button>
+          {saveError && <p className="text-xs text-red-400 self-center mr-auto">{saveError}</p>}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              handleSave();
+            }}
+            disabled={isSaving}
+            className="px-4 py-2 bg-[var(--app-accent)] text-white rounded-lg hover:bg-[var(--app-accent)] transition-colors disabled:opacity-60"
+          >
+            {isSaving ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+  );
+  
+  if (isEmbedded) {
+    return content;
+  }
+
+return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      {content}
+    </div>
+  );
+};
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/Header.tsx ---
+import React from 'react';
+import { AIProviderConfig } from '../types';
+
+interface HeaderProps {
+  onOpenSettings: () => void;
+  onSignOut?: () => void;
+  sunoCredits: number | null;
+  providerConfig?: AIProviderConfig;
+  authBypassEnabled?: boolean;
+  sunoConnectionState?: 'missing' | 'checking' | 'connected' | 'lost';
+}
+
+export const Header: React.FC<HeaderProps> = ({ 
+  onOpenSettings,
+  onSignOut,
+  sunoCredits,
+  providerConfig,
+  authBypassEnabled = false,
+  sunoConnectionState = 'missing',
+}) => {
+  const buildLabel = `v${import.meta.env.VITE_APP_VERSION || 'dev'} (${import.meta.env.VITE_APP_COMMIT || 'local'})`;
+  const providerLabel =
+    providerConfig?.type === 'gemini'
+      ? 'Powered by Gemini'
+      : providerConfig?.type === 'openrouter'
+        ? 'Powered by OpenRouter'
+        : providerConfig?.type === 'openapi'
+          ? 'Powered by Custom API'
+          : 'No provider selected';
+
+const sunoBadge = (() => {
+    if (sunoConnectionState === 'connected') {
+      return {
+        cls: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200',
+        dot: 'bg-emerald-300',
+        text: 'Suno Connected',
+        title: 'Suno API connection is healthy',
+      };
+    }
+    if (sunoConnectionState === 'checking') {
+      return {
+        cls: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+        dot: 'bg-amber-300',
+        text: 'Suno Checking',
+        title: 'Verifying Suno API connection',
+      };
+    }
+    if (sunoConnectionState === 'lost') {
+      return {
+        cls: 'border-red-500/40 bg-red-500/10 text-red-200',
+        dot: 'bg-red-300',
+        text: 'Suno Lost',
+        title: 'Suno API connection lost. Update token/cookie in Settings.',
+      };
+    }
+    return {
+      cls: 'border-slate-500/40 bg-slate-500/10 text-slate-300',
+      dot: 'bg-slate-300',
+      text: 'Suno Missing',
+      title: 'No Suno token/cookie configured',
+    };
+  })();
+
+return (
+    <header className="w-full py-4 px-4 md:px-8 flex items-center justify-between border-b border-[var(--app-panel-border)] bg-[var(--app-panel)] backdrop-blur-md sticky top-0 z-50">
+      <div className="flex items-center gap-3">
+        <div className="bg-gradient-to-br from-purple-500 to-pink-600 p-2 rounded-lg shadow-lg shadow-purple-500/20">
+          {/* Music Icon */}
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-white">
+            <path d="M9 18V5l12-2v13" />
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+          </svg>
+        </div>
+        <div>
+          <h1 className="text-xl font-bold tracking-tight text-white">
+            Suno <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400">Architect</span>
+          </h1>
+          <p className="text-xs text-slate-400 font-medium" title={`Build ${buildLabel}`}>
+            {providerLabel}
+            {providerConfig?.model && ` • ${providerConfig.model}`}
+            {` • ${buildLabel}`}
+          </p>
+        </div>
+      </div>
+      
+      <div className="flex items-center gap-2 sm:gap-3 relative">
+        <div
+          className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold uppercase tracking-wide ${sunoBadge.cls}`}
+          title={sunoBadge.title}
+        >
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${sunoBadge.dot}`} />
+          {sunoBadge.text}
+        </div>
+
+{authBypassEnabled && (
+          <div
+            className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-amber-500/40 bg-amber-500/10 text-amber-200 text-[11px] font-bold uppercase tracking-wide"
+            title="Authentication is disabled for this deployment"
+          >
+            <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-300" />
+            Auth Disabled
+          </div>
+        )}
+
+{/* Credits Display - Visible when logged in (credits not null) */}
+        {sunoCredits !== null && (
+            <div className="hidden sm:flex items-center gap-2 bg-[var(--app-panel)] border border-[var(--app-panel-border)]/50 px-3 py-1 rounded-lg mr-1 backdrop-blur-sm">
+                <div className="flex flex-col items-end leading-none">
+                    <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider mb-0.5">Credits</span>
+                    <span className="text-sm font-bold text-[var(--app-accent)] font-mono">{sunoCredits}</span>
+                </div>
+            </div>
+        )}
+
+{onSignOut && (
+          <button
+            onClick={onSignOut}
+            className="flex items-center gap-2 bg-[var(--app-panel)] text-slate-400 hover:text-white hover:bg-[var(--app-tab-hover)] border border-[var(--app-panel-border)] rounded-lg px-3 py-2 transition-all text-xs font-bold shadow-sm"
+            title="Sign Out"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <path d="m16 17 5-5-5-5" />
+              <path d="M21 12H9" />
+            </svg>
+            <span className="hidden sm:inline">Sign Out</span>
+          </button>
+        )}
+
+{/* Unified Settings Button */}
+        <button
+            onClick={onOpenSettings}
+            className="flex items-center gap-2 bg-[var(--app-panel)] text-slate-400 hover:text-white hover:bg-[var(--app-tab-hover)] border border-[var(--app-panel-border)] rounded-lg px-3 py-2 transition-all text-xs font-bold shadow-sm"
+            title="Open Settings"
+        >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+            </svg>
+            <span>Settings</span>
+        </button>
+      </div>
+    </header>
+  );
+};
+
+```
+
+```tsx
+# --- File: /home/tim/Suno-Architect/src/components/WebAudioMasterSection.tsx ---
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { AppCard } from './ui/AppPrimitives';
+import LibraryPickerModal, { LibrarySelection } from './LibraryPickerModal';
+import WebAudioMasterNativeControls from './WebAudioMasterNativeControls';
+import WebAudioMasterNativePreview, { NativePreviewStatusSummary } from './WebAudioMasterNativePreview';
+import { MasteringSettings, OfflineTrack, TrackVariant } from '../services/offlineDb';
+import { convertToWav, waitForWavConversion } from '../services/sunoApi';
+import { createDefaultMasteringSettings, renderNativeMasteredWavFromBlob } from '../services/mastering/nativeMasteringPipeline';
+
+type SelectedReference = {
+  track: OfflineTrack;
+  variant?: TrackVariant;
+  sourceKind: 'library-original' | 'library-variant' | 'uploaded';
+};
+
+function mapWamSettingsToVariantSettings(raw?: Record<string, any>): MasteringSettings | undefined {
+  if (!raw) return undefined;
+
+return {
+    inputGain: Number(raw.inputGain ?? 0),
+    glueCompression: Boolean(raw.glueCompression),
+    deharsh: Boolean(raw.deharsh),
+    cleanLowEnd: Boolean(raw.cleanLowEnd),
+    autoLevel: Boolean(raw.autoLevel),
+    addPunch: Boolean(raw.addPunch),
+    stereoWidth: Number(raw.stereoWidth ?? 100),
+    centerBass: Boolean(raw.centerBass),
+    cutMud: Boolean(raw.cutMud),
+    addAir: Boolean(raw.addAir),
+    tapeWarmth: Boolean(raw.tapeWarmth),
+    normalizeLoudness: Boolean(raw.normalizeLoudness),
+    targetLufs: Number(raw.targetLufs ?? -14),
+    truePeakLimit: Boolean(raw.truePeakLimit),
+    ceiling: Number(raw.truePeakCeiling ?? -1),
+    sampleRate: Number(raw.sampleRate ?? 48000),
+    bitDepth: Number(raw.bitDepth ?? 24),
+    eq: {
+      low: Number(raw.eqLow ?? 0),
+      lowMid: Number(raw.eqLowMid ?? 0),
+      mid: Number(raw.eqMid ?? 0),
+      highMid: Number(raw.eqHighMid ?? 0),
+      high: Number(raw.eqHigh ?? 0),
+    },
+  };
+}
+
+const WebAudioMasterSection: React.FC = () => {
+  const settingsStorageKey = 'wam_native_settings_v1';
+  const [showLibraryPicker, setShowLibraryPicker] = useState(false);
+  const [selectedReference, setSelectedReference] = useState<SelectedReference | null>(null);
+  const [isConvertingToWav, setIsConvertingToWav] = useState(false);
+  const [wavProgress, setWavProgress] = useState('');
+  const [saveStatus, setSaveStatus] = useState<string>('');
+  const [selectedSourceBlob, setSelectedSourceBlob] = useState<Blob | null>(null);
+  const [selectedSourceFileName, setSelectedSourceFileName] = useState<string>('');
+  const [nativeSettings, setNativeSettings] = useState<MasteringSettings>(() => {
+    const defaults = createDefaultMasteringSettings();
+    try {
+      const raw = localStorage.getItem(settingsStorageKey);
+      if (!raw) return defaults;
+      const parsed = JSON.parse(raw) as Partial<MasteringSettings>;
+      return {
+        ...defaults,
+        ...parsed,
+        eq: {
+          ...defaults.eq,
+          ...(parsed.eq || {}),
+        },
+      };
+    } catch {
+      return defaults;
+    }
+  });
+  const [isNativeRendering, setIsNativeRendering] = useState(false);
+  const [nativeProgress, setNativeProgress] = useState<string>('');
+  const [previewStatus, setPreviewStatus] = useState<NativePreviewStatusSummary>({
+    status: 'idle',
+    statusMessage: '',
+    hasSource: false,
+    hasPreview: false,
+    renderProgress: null,
+  });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+const getSunoApiWavKey = () => {
+    const keys = ['sunoapi_key', 'suno_api_key', 'sunoApiKey'];
+    for (const key of keys) {
+      const value = localStorage.getItem(key);
+      if (value?.trim()) return value.trim();
+    }
+    return '';
+  };
+
+useEffect(() => {
+    try {
+      localStorage.setItem(settingsStorageKey, JSON.stringify(nativeSettings));
+    } catch {
+      // ignore storage quota/private mode errors
+    }
+  }, [nativeSettings]);
+
+const loadBlobReference = useCallback(async (blob: Blob, fileName: string, reference: SelectedReference) => {
+    setSelectedReference(reference);
+    setWavProgress('Loading audio...');
+    setSelectedSourceBlob(blob);
+    setSelectedSourceFileName(fileName);
+    setWavProgress('');
+    setSaveStatus('');
+    setNativeProgress('');
+  }, []);
+
+const handleSelectFromLibrary = useCallback(async ({ track, variant }: LibrarySelection) => {
+    const reference: SelectedReference = {
+      track,
+      variant,
+      sourceKind: variant ? 'library-variant' : 'library-original',
+    };
+
+if (variant?.audioBlob) {
+      const variantExt = variant.title.toLowerCase().endsWith('.wav') ? '' : '.wav';
+      await loadBlobReference(variant.audioBlob, `${variant.title}${variantExt}`, reference);
+      return;
+    }
+
+const sourceUrl = variant?.audioUrl || track.audioUrl;
+    setSelectedReference(reference);
+    setWavProgress('Loading audio...');
+
+try {
+      const response = await fetch(sourceUrl);
+      const contentLength = response.headers.get('content-length');
+      const blob = await response.blob();
+      console.log('[DEBUG AUDIO LOAD] Fetch from URL:', sourceUrl, {
+        status: response.status,
+        contentLength: contentLength ? parseInt(contentLength) : 'missing',
+        blobSize: blob.size,
+        blobType: blob.type,
+      });
+      const ext = sourceUrl.split('.').pop() || (variant ? 'wav' : 'mp3');
+      const sourceTitle = variant?.title || track.title;
+      await loadBlobReference(blob, `${sourceTitle}.${ext}`, reference);
+    } catch (error) {
+      console.error('Failed to load track audio:', error);
+      setWavProgress('Failed to load audio');
+    }
+  }, [loadBlobReference]);
+
+const handleUploadWav = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      console.log('[DEBUG AUDIO LOAD] File upload:', file.name, {
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified,
+      });
+      setSelectedReference({
+        track: {
+          id: 'uploaded',
+          sunoId: '',
+          title: file.name.replace(/\.[^.]+$/, ''),
+          audioUrl: '',
+          imageUrl: '',
+          lyricsText: '',
+          lrcContent: '',
+          srtContent: '',
+          metadata: { tags: [], prompt: '', durationMs: 0 },
+          cachedLocally: false,
+          raw: null,
+          updatedAt: Date.now(),
+          createdAt: Date.now(),
+        },
+        sourceKind: 'uploaded',
+      });
+      setSaveStatus('');
+      setSelectedSourceBlob(file);
+      setSelectedSourceFileName(file.name);
+      setNativeProgress('');
+      setWavProgress('');
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+const handleNativeQuickMaster = async () => {
+    if (!selectedSourceBlob || !selectedSourceFileName) {
+      setNativeProgress('Select a library track or upload a file first.');
+      return;
+    }
+
+setIsNativeRendering(true);
+    setNativeProgress('Preparing native mastering pipeline...');
+    setSaveStatus('');
+
+try {
+      const result = await renderNativeMasteredWavFromBlob(
+        selectedSourceBlob,
+        selectedSourceFileName,
+        nativeSettings,
+        (update) => {
+          const pct = Math.round(update.progress * 100);
+          setNativeProgress(`${pct}% • ${update.message}`);
+        }
+      );
+
+const url = URL.createObjectURL(result.blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+await saveMasteredToLibrary(result.blob, result.fileName);
+
+setNativeProgress(
+        `Native pipeline complete.`
+      );
+    } catch (error) {
+      console.error('Native mastering pipeline failed:', error);
+      setNativeProgress(`Native pipeline failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setIsNativeRendering(false);
+    }
+  };
+
+const sourceIsLoading = isConvertingToWav || (!!wavProgress && !selectedSourceBlob);
+  const previewIsRendering = previewStatus.status === 'rendering';
+  const previewReady = previewStatus.hasPreview && ['ready', 'playing', 'paused'].includes(previewStatus.status);
+  const canRunNativeMaster = !!selectedSourceBlob && !sourceIsLoading && !isNativeRendering && previewReady;
+  const sourceLooksLikeNonWavLibraryOriginal =
+    !!selectedReference &&
+    selectedReference.sourceKind === 'library-original' &&
+    !!selectedSourceFileName &&
+    !/\.wav$/i.test(selectedSourceFileName);
+  const nativeMasterDisabledReason =
+    !selectedSourceBlob
+      ? 'Select or upload a source first.'
+      : sourceIsLoading
+        ? 'Source audio is still loading/converting.'
+        : previewIsRendering
+          ? 'Wait for Native Preview analysis to finish.'
+          : !previewReady
+            ? 'Native Preview is not ready yet.'
+            : isNativeRendering
+              ? 'Native master render is already in progress.'
+              : '';
+
+const saveMasteredToLibrary = async (blob: Blob, fileName: string, rawSettings?: Record<string, any>) => {
+    if (!selectedReference || selectedReference.sourceKind === 'uploaded') {
+      setSaveStatus('Exported WAV generated (not saved to library because source is a local upload).');
+      return;
+    }
+
+try {
+      const { getTrackById, updateTrack } = await import('../services/offlineDb');
+      const track = await getTrackById(selectedReference.track.id);
+
+if (!track) {
+        console.error('Track not found in database');
+        setSaveStatus('Mastered export completed, but the source track was not found in the library.');
+        return;
+      }
+
+const variant: TrackVariant = {
+        id: crypto.randomUUID(),
+        type: 'mastered',
+        title: fileName.replace(/\.wav$/i, ''),
+        audioUrl: '',
+        audioBlob: blob,
+        imageUrl: track.imageUrl,
+        createdAt: Date.now(),
+        settings: mapWamSettingsToVariantSettings(rawSettings),
+        parentVariantId: selectedReference.variant?.id,
+      };
+
+const variants = track.variants || [];
+      variants.push(variant);
+
+await updateTrack({
+        ...track,
+        variants
+      });
+
+console.log('Mastered variant saved:', variant.id);
+      setSaveStatus(`Saved mastered variant to library: ${variant.title}`);
+    } catch (error) {
+      console.error('Failed to save mastered track:', error);
+      setSaveStatus('Mastered export completed, but saving the variant to the library failed.');
+    }
+  };
+
+const handleConvertAndLoad = async (track: OfflineTrack) => {
+    setSelectedReference({
+      track,
+      sourceKind: 'library-original',
+    });
+    setIsConvertingToWav(true);
+    setWavProgress('Requesting WAV conversion...');
+    setSaveStatus('');
+
+try {
+      const apiKey = getSunoApiWavKey();
+      if (!apiKey) {
+        setWavProgress('No SunoAPI WAV key configured (`sunoapi_key`). Loading MP3 instead.');
+        await handleSelectFromLibrary({ track });
+        return;
+      }
+
+const { taskId } = await convertToWav(track.sunoId, 0, apiKey);
+      if (!taskId) {
+        throw new Error('WAV conversion endpoint returned no task id');
+      }
+      setWavProgress('Converting to WAV (this may take a minute)...');
+
+const result = await waitForWavConversion(taskId, apiKey);
+      
+      if (result.audioWavUrl) {
+        setWavProgress('Downloading WAV...');
+        const response = await fetch(result.audioWavUrl);
+        const blob = await response.blob();
+        const fileName = `${track.title}.wav`;
+
+await loadBlobReference(blob, fileName, {
+          track,
+          sourceKind: 'library-original',
+        });
+        setWavProgress('Loaded Suno WAV source.');
+      } else {
+        throw new Error('WAV conversion finished but no audioWavUrl was returned');
+      }
+    } catch (error) {
+      console.error('WAV conversion failed:', error);
+      setWavProgress(`Suno WAV unavailable (${error instanceof Error ? error.message : String(error)}). Loading MP3 instead.`);
+      await handleSelectFromLibrary({ track });
+    } finally {
+      setIsConvertingToWav(false);
+    }
+  };
