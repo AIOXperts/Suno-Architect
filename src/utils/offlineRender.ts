@@ -12,6 +12,7 @@ type RollConfig = {
     previewStartSeconds?: number;
     previewDurationSeconds?: number;
     previewShowTitle?: boolean;
+    headingText?: string;
     showTitle?: boolean;
     titleText?: string;
     theme?: 'clean' | 'bold';
@@ -95,12 +96,14 @@ const drawRollCard = (
     ctx.fill();
     ctx.stroke();
 
-    const heading = roll.previewEnabled ? 'Preview Intro' : 'Message Card';
+    const heading = (roll.headingText || '').trim() || (roll.previewEnabled ? 'Preview Intro' : 'Message Card');
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
-    ctx.fillStyle = '#f8fafc';
-    ctx.font = `700 ${Math.max(22, Math.round(width * 0.035))}px Inter, Arial, sans-serif`;
-    ctx.fillText(heading, width / 2, panelY + Math.max(18, Math.round(panelHeight * 0.08)));
+    if (heading) {
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = `700 ${Math.max(22, Math.round(width * 0.035))}px Inter, Arial, sans-serif`;
+        ctx.fillText(heading, width / 2, panelY + Math.max(18, Math.round(panelHeight * 0.08)));
+    }
 
     const effectiveTitle = (roll.titleText || '').trim() || title.trim();
     const shouldShowTitle = !!roll.showTitle || (!!roll.previewEnabled && !!roll.previewShowTitle);

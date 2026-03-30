@@ -55,6 +55,8 @@ type VisualizerConfig = {
     preRollPreviewStartSeconds: number;
     preRollPreviewDurationSeconds: number;
     preRollPreviewShowTitle: boolean;
+    preRollShowHeading: boolean;
+    preRollHeadingText: string;
     preRollCardShowTitle: boolean;
     preRollCardTitleText: string;
     preRollCardTheme: 'clean' | 'bold';
@@ -62,6 +64,8 @@ type VisualizerConfig = {
     postRollType: 'text' | 'qr';
     postRollText: string;
     postRollSeconds: number;
+    postRollShowHeading: boolean;
+    postRollHeadingText: string;
 };
 type SavedVisualizerPreset = {
     id: string;
@@ -124,6 +128,8 @@ export const useVisualizer = (
     const [preRollPreviewStartSeconds, setPreRollPreviewStartSeconds] = useState(20);
     const [preRollPreviewDurationSeconds, setPreRollPreviewDurationSeconds] = useState(7);
     const [preRollPreviewShowTitle, setPreRollPreviewShowTitle] = useState(true);
+    const [preRollShowHeading, setPreRollShowHeading] = useState(true);
+    const [preRollHeadingText, setPreRollHeadingText] = useState('');
     const [preRollCardShowTitle, setPreRollCardShowTitle] = useState(true);
     const [preRollCardTitleText, setPreRollCardTitleText] = useState('');
     const [preRollCardTheme, setPreRollCardTheme] = useState<'clean' | 'bold'>('clean');
@@ -131,6 +137,8 @@ export const useVisualizer = (
     const [postRollType, setPostRollType] = useState<'text' | 'qr'>('text');
     const [postRollText, setPostRollText] = useState('Tripped Out Tim');
     const [postRollSeconds, setPostRollSeconds] = useState(4);
+    const [postRollShowHeading, setPostRollShowHeading] = useState(true);
+    const [postRollHeadingText, setPostRollHeadingText] = useState('');
     const [imgSrc, setImgSrc] = useState<string>('');
     const [hasDefaultLogo, setHasDefaultLogo] = useState(false);
 
@@ -326,6 +334,8 @@ export const useVisualizer = (
                     if (typeof session.config.preRollPreviewStartSeconds === 'number') setPreRollPreviewStartSeconds(session.config.preRollPreviewStartSeconds);
                     if (typeof session.config.preRollPreviewDurationSeconds === 'number') setPreRollPreviewDurationSeconds(session.config.preRollPreviewDurationSeconds);
                     if (typeof session.config.preRollPreviewShowTitle === 'boolean') setPreRollPreviewShowTitle(session.config.preRollPreviewShowTitle);
+                    if (typeof session.config.preRollShowHeading === 'boolean') setPreRollShowHeading(session.config.preRollShowHeading);
+                    if (typeof session.config.preRollHeadingText === 'string') setPreRollHeadingText(session.config.preRollHeadingText);
                     if (typeof session.config.preRollCardShowTitle === 'boolean') setPreRollCardShowTitle(session.config.preRollCardShowTitle);
                     if (typeof session.config.preRollCardTitleText === 'string') setPreRollCardTitleText(session.config.preRollCardTitleText);
                     if (session.config.preRollCardTheme === 'clean' || session.config.preRollCardTheme === 'bold') setPreRollCardTheme(session.config.preRollCardTheme);
@@ -333,6 +343,8 @@ export const useVisualizer = (
                     if (session.config.postRollType) setPostRollType(session.config.postRollType);
                     if (typeof session.config.postRollText === 'string') setPostRollText(session.config.postRollText);
                     if (typeof session.config.postRollSeconds === 'number') setPostRollSeconds(session.config.postRollSeconds);
+                    if (typeof session.config.postRollShowHeading === 'boolean') setPostRollShowHeading(session.config.postRollShowHeading);
+                    if (typeof session.config.postRollHeadingText === 'string') setPostRollHeadingText(session.config.postRollHeadingText);
                 }
             }
         } catch (err) {
@@ -810,19 +822,23 @@ export const useVisualizer = (
         preRollPreviewStartSeconds,
         preRollPreviewDurationSeconds,
         preRollPreviewShowTitle,
+        preRollShowHeading,
+        preRollHeadingText,
         preRollCardShowTitle,
         preRollCardTitleText,
         preRollCardTheme,
         postRollEnabled,
         postRollType,
         postRollText,
-        postRollSeconds
+        postRollSeconds,
+        postRollShowHeading,
+        postRollHeadingText
     }), [
         aspectRatio, showBackgroundLayer, mainVisualizerEnabled, templatePreset, activeColor, inactiveColor, inactiveOpacity, fontFamily,
         smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, qt6SpectrogramSpeed, qt6ParticleDensity, qt6RingCount, qt6LedSegments, qt6SpectrogramPalette,
         logoPosition, logoScale, logoOpacity, logoPulseEnabled, logoPulseStyle, logoPulseGap, logoPulseScale, logoPulseSensitivity, showTitle,
         videoBitrate, videoBitrateMode, audioBitrate, fps,
-        outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, preRollPreviewEnabled, preRollPreviewStartSeconds, preRollPreviewDurationSeconds, preRollPreviewShowTitle, preRollCardShowTitle, preRollCardTitleText, preRollCardTheme, postRollEnabled, postRollType, postRollText, postRollSeconds
+        outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, preRollPreviewEnabled, preRollPreviewStartSeconds, preRollPreviewDurationSeconds, preRollPreviewShowTitle, preRollShowHeading, preRollHeadingText, preRollCardShowTitle, preRollCardTitleText, preRollCardTheme, postRollEnabled, postRollType, postRollText, postRollSeconds, postRollShowHeading, postRollHeadingText
     ]);
 
     const applyConfig = useCallback((config: any) => {
@@ -870,6 +886,8 @@ export const useVisualizer = (
         if (typeof config.preRollPreviewStartSeconds === 'number') setPreRollPreviewStartSeconds(config.preRollPreviewStartSeconds);
         if (typeof config.preRollPreviewDurationSeconds === 'number') setPreRollPreviewDurationSeconds(config.preRollPreviewDurationSeconds);
         if (typeof config.preRollPreviewShowTitle === 'boolean') setPreRollPreviewShowTitle(config.preRollPreviewShowTitle);
+        if (typeof config.preRollShowHeading === 'boolean') setPreRollShowHeading(config.preRollShowHeading);
+        if (typeof config.preRollHeadingText === 'string') setPreRollHeadingText(config.preRollHeadingText);
         if (typeof config.preRollCardShowTitle === 'boolean') setPreRollCardShowTitle(config.preRollCardShowTitle);
         if (typeof config.preRollCardTitleText === 'string') setPreRollCardTitleText(config.preRollCardTitleText);
         if (config.preRollCardTheme === 'clean' || config.preRollCardTheme === 'bold') setPreRollCardTheme(config.preRollCardTheme);
@@ -877,6 +895,8 @@ export const useVisualizer = (
         if (config.postRollType) setPostRollType(config.postRollType);
         if (typeof config.postRollText === 'string') setPostRollText(config.postRollText);
         if (typeof config.postRollSeconds === 'number') setPostRollSeconds(config.postRollSeconds);
+        if (typeof config.postRollShowHeading === 'boolean') setPostRollShowHeading(config.postRollShowHeading);
+        if (typeof config.postRollHeadingText === 'string') setPostRollHeadingText(config.postRollHeadingText);
     }, []);
 
     const saveCurrentPreset = useCallback((name: string) => {
@@ -1394,9 +1414,12 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
 
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillStyle = '#f8fafc';
-        ctx.font = `700 ${Math.max(22, Math.round(width * 0.035))}px Inter, Arial, sans-serif`;
-        ctx.fillText(heading, width / 2, panelY + Math.max(18, Math.round(panelHeight * 0.08)));
+        const trimmedHeading = heading.trim();
+        if (trimmedHeading) {
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = `700 ${Math.max(22, Math.round(width * 0.035))}px Inter, Arial, sans-serif`;
+            ctx.fillText(trimmedHeading, width / 2, panelY + Math.max(18, Math.round(panelHeight * 0.08)));
+        }
 
         const effectiveTitle = (titleText || '').trim() || clipData?.title?.trim() || '';
         if (includeTitle && effectiveTitle) {
@@ -1644,7 +1667,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
                     dims.height,
                     preRollType,
                     preRollText,
-                    preRollPreviewEnabled ? 'Preview Intro' : 'Pre-Roll',
+                    preRollShowHeading ? (preRollHeadingText.trim() || (preRollPreviewEnabled ? 'Preview Intro' : 'Pre-Roll')) : '',
                     preRollCardShowTitle || (preRollPreviewEnabled && preRollPreviewShowTitle),
                     preRollCardTitleText,
                     preRollCardTheme
@@ -1656,7 +1679,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
                     dims.height,
                     postRollType,
                     postRollText,
-                    'Post-Roll',
+                    postRollShowHeading ? (postRollHeadingText.trim() || 'Post-Roll') : '',
                     false
                 );
             }
@@ -1664,7 +1687,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
             setProgress(virtualTime);
             requestRef.current = requestAnimationFrame(animate);
         }
-    }, [activeColor, aspectRatio, audioDuration, clipData, clampTimeline, customBg, fontFamily, inactiveColor, inactiveOpacity, isPlaying, isRendering, lines, logoAsset, logoOpacity, logoPosition, logoPulseEnabled, logoPulseGap, logoPulseScale, logoPulseSensitivity, logoPulseStyle, logoScale, mainVisualizerEnabled, mapPreviewToSongTime, postRollDuration, postRollEnabled, postRollText, postRollType, preRollCardShowTitle, preRollCardTheme, preRollCardTitleText, preRollDuration, preRollEnabled, preRollPreviewEnabled, preRollPreviewShowTitle, preRollText, preRollType, progress, qt6BarCount, qt6LedSegments, qt6ParticleDensity, qt6RingCount, qt6Sensitivity, qt6SpectrogramPalette, qt6SpectrogramSpeed, qt6Style, showBackgroundLayer, showTitle, smoothingFactor, totalPreviewDuration, verticalOffset]);
+    }, [activeColor, aspectRatio, audioDuration, clipData, clampTimeline, customBg, fontFamily, inactiveColor, inactiveOpacity, isPlaying, isRendering, lines, logoAsset, logoOpacity, logoPosition, logoPulseEnabled, logoPulseGap, logoPulseScale, logoPulseSensitivity, logoPulseStyle, logoScale, mainVisualizerEnabled, mapPreviewToSongTime, postRollDuration, postRollEnabled, postRollHeadingText, postRollShowHeading, postRollText, postRollType, preRollCardShowTitle, preRollCardTheme, preRollCardTitleText, preRollDuration, preRollEnabled, preRollHeadingText, preRollPreviewEnabled, preRollPreviewShowTitle, preRollShowHeading, preRollText, preRollType, progress, qt6BarCount, qt6LedSegments, qt6ParticleDensity, qt6RingCount, qt6Sensitivity, qt6SpectrogramPalette, qt6SpectrogramSpeed, qt6Style, showBackgroundLayer, showTitle, smoothingFactor, totalPreviewDuration, verticalOffset]);
 
     useEffect(() => {
         if (selectedClipId && !isRendering) {
@@ -1719,6 +1742,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
                         previewStartSeconds: preRollPreviewStartSeconds,
                         previewDurationSeconds: preRollPreviewDurationSeconds,
                         previewShowTitle: preRollPreviewShowTitle,
+                        headingText: preRollShowHeading ? (preRollHeadingText.trim() || (preRollPreviewEnabled ? 'Preview Intro' : 'Pre-Roll')) : '',
                         showTitle: preRollCardShowTitle,
                         titleText: preRollCardTitleText,
                         theme: preRollCardTheme
@@ -1727,7 +1751,8 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
                         enabled: postRollEnabled,
                         type: postRollType,
                         text: postRollText,
-                        seconds: postRollSeconds
+                        seconds: postRollSeconds,
+                        headingText: postRollShowHeading ? (postRollHeadingText.trim() || 'Post-Roll') : ''
                     }
                 },
                 setRenderProgress,
@@ -1768,7 +1793,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
         state: {
             selectedClipId, manualId, aspectRatio, showBackgroundLayer, mainVisualizerEnabled, visualMode: currentVisualMode, customBg, customAudio,
             templatePreset, logoAsset, logoPosition, logoScale, logoOpacity, logoPulseEnabled, logoPulseStyle, logoPulseGap, logoPulseScale, logoPulseSensitivity, showTitle,
-            audioBitrate, videoBitrate, videoBitrateMode, fps, outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, preRollPreviewEnabled, preRollPreviewStartSeconds, preRollPreviewDurationSeconds, preRollPreviewShowTitle, preRollCardShowTitle, preRollCardTitleText, preRollCardTheme, postRollEnabled, postRollType, postRollText, postRollSeconds, imgSrc, activeColor, inactiveColor, inactiveOpacity, fontFamily,
+            audioBitrate, videoBitrate, videoBitrateMode, fps, outputAspectTarget, preRollEnabled, preRollType, preRollText, preRollSeconds, preRollPreviewEnabled, preRollPreviewStartSeconds, preRollPreviewDurationSeconds, preRollPreviewShowTitle, preRollShowHeading, preRollHeadingText, preRollCardShowTitle, preRollCardTitleText, preRollCardTheme, postRollEnabled, postRollType, postRollText, postRollSeconds, postRollShowHeading, postRollHeadingText, imgSrc, activeColor, inactiveColor, inactiveOpacity, fontFamily,
             smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, qt6SpectrogramSpeed, qt6ParticleDensity, qt6RingCount, qt6LedSegments, qt6SpectrogramPalette,
             clipData, alignment, lines, lyricSource, lrcDraft, applyStatus, lrcApplyStatus, savedPresets,
             longLineIssues, longLrcGapIssues, lrcInvalidLineNumbers: lrcParseResult.invalidLineNumbers, lrcParsedLineCount: lrcParseResult.entries.length,
@@ -1778,7 +1803,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
         setters: {
             setSelectedClipId, setManualId, setAspectRatio, setShowBackgroundLayer, setMainVisualizerEnabled, setCustomBg, setCustomAudio,
             setTemplatePreset, setLogoAsset, setLogoPosition, setLogoScale, setLogoOpacity, setLogoPulseEnabled, setLogoPulseStyle, setLogoPulseGap, setLogoPulseScale, setLogoPulseSensitivity, setShowTitle,
-            setAudioBitrate, setVideoBitrate, setVideoBitrateMode, setFps, setOutputAspectTarget, setPreRollEnabled, setPreRollType, setPreRollText, setPreRollSeconds, setPreRollPreviewEnabled, setPreRollPreviewStartSeconds, setPreRollPreviewDurationSeconds, setPreRollPreviewShowTitle, setPreRollCardShowTitle, setPreRollCardTitleText, setPreRollCardTheme, setPostRollEnabled, setPostRollType, setPostRollText, setPostRollSeconds, setImgSrc, setActiveColor, setInactiveColor, setInactiveOpacity, setFontFamily,
+            setAudioBitrate, setVideoBitrate, setVideoBitrateMode, setFps, setOutputAspectTarget, setPreRollEnabled, setPreRollType, setPreRollText, setPreRollSeconds, setPreRollPreviewEnabled, setPreRollPreviewStartSeconds, setPreRollPreviewDurationSeconds, setPreRollPreviewShowTitle, setPreRollShowHeading, setPreRollHeadingText, setPreRollCardShowTitle, setPreRollCardTitleText, setPreRollCardTheme, setPostRollEnabled, setPostRollType, setPostRollText, setPostRollSeconds, setPostRollShowHeading, setPostRollHeadingText, setImgSrc, setActiveColor, setInactiveColor, setInactiveOpacity, setFontFamily,
             setSmoothingFactor, setVerticalOffset, setQt6Style, setQt6BarCount, setQt6Sensitivity, setQt6SpectrogramSpeed, setQt6ParticleDensity, setQt6RingCount, setQt6LedSegments, setQt6SpectrogramPalette,
             setLyricSource, setLrcDraft, setIsPlaying
         },
