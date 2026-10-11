@@ -58,6 +58,26 @@ export interface OfflineTrack {
   updatedAt: number;
   createdAt: number;
   variants?: TrackVariant[];
+  /** Set when the user archives the track locally (soft delete). Undefined = active. */
+  archivedAt?: number;
+  /** Set when a sync no longer sees this track in the remote Suno feed. */
+  goneFromRemote?: boolean;
+}
+
+export class TrackNotFoundError extends Error {
+  readonly trackId: string;
+  constructor(trackId: string) {
+    super(`Track not found: ${trackId}`);
+    this.name = 'TrackNotFoundError';
+    this.trackId = trackId;
+  }
+}
+
+export interface TrackStatusBuckets {
+  active: OfflineTrack[];
+  archived: OfflineTrack[];
+  goneFromRemote: OfflineTrack[];
+  all: OfflineTrack[];
 }
 
 export interface OfflineAlbum {
@@ -173,6 +193,18 @@ export const getOfflineDb = () => {
   return dbPromise;
 };
 
+/** Test-only hook: drop the cached connection so a fresh IDBFactory can be used. */
+export const __resetOfflineDbForTests = async () => {
+  if (dbPromise) {
+    try {
+      (await dbPromise).close();
+    } catch {
+      // ignore
+    }
+  }
+  dbPromise = null;
+};
+
 export const upsertTracks = async (tracks: OfflineTrack[]) => {
   if (!tracks.length) return;
   const db = await getOfflineDb();
@@ -248,6 +280,51 @@ export const listAllTracks = async (): Promise<OfflineTrack[]> => {
 export const getTrackById = async (id: string): Promise<OfflineTrack | undefined> => {
   const db = await getOfflineDb();
   return db.get('tracks', id);
+};
+
+const requireTrack = async (id: string): Promise<OfflineTrack> => {
+  const track = await getTrackById(id);
+  if (!track) throw new TrackNotFoundError(id);
+  return track;
+};
+
+/** Soft-archive a track (non-destructive). Idempotent: keeps the original archivedAt. */
+export const archiveTrack = async (id: string, now: number = Date.now()): Promise<OfflineTrack> => {
+  const track = await requireTrack(id);
+  if (typeof track.archivedAt === 'number') return track;
+  const next: OfflineTrack = { ...track, archivedAt: now };
+  await updateTrack(next);
+  return next;
+};
+
+/** Clear archivedAt ONLY. goneFromRemote is left untouched (reset by a later sync). */
+export const restoreTrack = async (id: string): Promise<OfflineTrack> => {
+  const track = await requireTrack(id);
+  const { archivedAt: _archivedAt, ...rest } = track;
+  const next: OfflineTrack = rest as OfflineTrack;
+  await updateTrack(next);
+  return next;
+};
+
+export const setGoneFromRemote = async (id: string, gone: boolean): Promise<OfflineTrack> => {
+  const track = await requireTrack(id);
+  const next: OfflineTrack = { ...track, goneFromRemote: gone };
+  await updateTrack(next);
+  return next;
+};
+
+const byUpdatedAtDesc = (a: OfflineTrack, b: OfflineTrack) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0);
+
+export const isTrackArchived = (track: OfflineTrack): boolean => typeof track.archivedAt === 'number';
+
+export const listTracksByStatus = async (): Promise<TrackStatusBuckets> => {
+  const all = (await listAllTracks()).sort(byUpdatedAtDesc);
+  return {
+    active: all.filter((t) => !isTrackArchived(t)),
+    archived: all.filter((t) => isTrackArchived(t)),
+    goneFromRemote: all.filter((t) => t.goneFromRemote === true),
+    all,
+  };
 };
 
 export const getPlaylistById = async (id: string): Promise<OfflinePlaylist | undefined> => {
