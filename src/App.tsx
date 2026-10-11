@@ -8,13 +8,16 @@ import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, 
 import Footer from './components/Footer';
 import { SettingsModal } from './components/SettingsModal';
 import { getSunoCredits, updateSunoMetadata, getSunoFeed, getSunoFeedOfflineAware, getSunoClip, getSunoPlaylist, isSunoUnauthorizedError } from './services/sunoApi';
-import { downloadAccountCache } from './services/offlineSyncService';
+import { downloadAccountCache, mirrorHistoryToLibrary } from './services/offlineSyncService';
+import { saveHistorySafely } from './utils/historyStorage';
 import HistorySection from './components/HistorySection/HistorySection';
+import LibrarySection from './components/LibrarySection/LibrarySection';
 import ActivityHistorySection from './components/ActivityHistorySection/ActivityHistorySection';
 import VisualizerSection from './components/VisualizerSection/VisualizerSection';
 import AlbumsSection from './components/AlbumsSection/AlbumsSection';
 import AlbumBuilderSection from './components/AlbumBuilderSection/AlbumBuilderSection';
 import WebAudioMasterSection from './components/WebAudioMasterSection';
+import CoverMatrixSection from './components/CoverMatrixSection/CoverMatrixSection';
 import { stripMetaTags } from './utils/lyrics';
 import { validateProviderConfig, getDefaultModelForProvider, getMaxTracksForProvider } from './services/providers/providerFactory';
 import {
@@ -43,6 +46,18 @@ const VIEW_TABS: { key: ViewMode; label: string; icon?: React.ReactNode }[] = [
     ),
   },
   {
+    key: 'cover-matrix',
+    label: 'Cover Matrix',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <rect x="3" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="3" width="7" height="7" rx="1" />
+        <rect x="14" y="14" width="7" height="7" rx="1" />
+        <rect x="3" y="14" width="7" height="7" rx="1" />
+      </svg>
+    ),
+  },
+  {
     key: 'activity-history',
     label: 'History',
     icon: (
@@ -56,6 +71,17 @@ const VIEW_TABS: { key: ViewMode; label: string; icon?: React.ReactNode }[] = [
   {
     key: 'history',
     label: 'Library',
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+        <path d="M3 6a2 2 0 0 1 2-2h3v16H5a2 2 0 0 0-2 2z" />
+        <path d="M21 6a2 2 0 0 0-2-2h-3v16h3a2 2 0 0 1 2 2z" />
+        <path d="M8 4h8v16H8z" />
+      </svg>
+    ),
+  },
+  {
+    key: 'library',
+    label: 'Track Library',
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
         <path d="M3 6a2 2 0 0 1 2-2h3v16H5a2 2 0 0 0-2 2z" />
@@ -100,7 +126,7 @@ const VIEW_TABS: { key: ViewMode; label: string; icon?: React.ReactNode }[] = [
   },
   {
     key: 'web-audio-master',
-    label: 'Web-Audio-Master',
+    label: 'Mastering',
     icon: (
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
         <path d="M4 12h2" />
@@ -257,7 +283,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
   };
   
   const [sunoCookie, setSunoCookie] = useState('');
-  const [sunoModel, setSunoModel] = useState('chirp-bluejay');
+  const [sunoModel, setSunoModel] = useState('chirp-hawk');
   const [sunoCredits, setSunoCredits] = useState<number | null>(null);
   const [sunoConnectionState, setSunoConnectionState] = useState<'missing' | 'checking' | 'connected' | 'lost'>('missing');
   const [isSyncingHistory, setIsSyncingHistory] = useState(false);
@@ -265,6 +291,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
   const [useCachedData, setUseCachedData] = useState(false);
   const [isDownloadingOfflineCache, setIsDownloadingOfflineCache] = useState(false);
   const [offlineProgress, setOfflineProgress] = useState('');
+  const [historyStorageWarning, setHistoryStorageWarning] = useState('');
 
   const [promptSettings, setPromptSettings] = useState<PromptSettings>(() => {
       try {
@@ -309,28 +336,63 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
     }
   }, []);
 
+  /**
+   * Dev-only: the CLI (`bun run suno:auth`) keeps `.suno-session/session.json` fresh and the Vite
+   * dev server exposes it at /__suno/session. The bridge is authoritative in dev — it overwrites any
+   * stale pasted token in localStorage, which would otherwise shadow it and leave the app "lost".
+   */
+  const adoptDevSession = useCallback(async (): Promise<string | null> => {
+    if (!import.meta.env.DEV) return null;
+    try {
+      const res = await fetch('/__suno/session', { headers: { accept: 'application/json' } });
+      if (!res.ok) return null;
+      const session = (await res.json()) as { token?: string; expired?: boolean };
+      if (!session?.token || session.expired) {
+        console.warn('[suno] dev session missing or expired — run `bun run suno:auth --refresh`');
+        return null;
+      }
+      localStorage.setItem('suno_cookie', session.token);
+      return session.token;
+    } catch {
+      return null; // Bridge unavailable (vite preview / non-Vite host) — caller falls back to the saved token.
+    }
+  }, []);
+
   useEffect(() => {
     const savedCookie = localStorage.getItem('suno_cookie');
     const savedModel = localStorage.getItem('suno_model');
     const savedLocalLibraryMode = localStorage.getItem('local_library_mode');
-    
-    if (savedCookie) {
-      setSunoCookie(savedCookie);
-      verifySunoConnection(savedCookie);
-      
+
+    const adopt = (cookie: string) => {
+      setSunoCookie(cookie);
+      verifySunoConnection(cookie);
       if (!historyFetchedRef.current) {
-          historyFetchedRef.current = true;
-          // Initial fetch with default limit
-          fetchAndMergeSunoHistory(savedCookie);
+        historyFetchedRef.current = true;
+        // Initial fetch with default limit
+        fetchAndMergeSunoHistory(cookie);
       }
+    };
+
+    if (import.meta.env.DEV) {
+      void (async () => {
+        const devToken = await adoptDevSession();
+        if (devToken) {
+          adopt(devToken);
+          return;
+        }
+        if (savedCookie) adopt(savedCookie);
+      })();
+    } else if (savedCookie) {
+      adopt(savedCookie);
     }
+
     if (savedModel) {
       setSunoModel(savedModel);
     }
     if (savedLocalLibraryMode) {
       setUseCachedData(savedLocalLibraryMode === '1');
     }
-  }, [verifySunoConnection]);
+  }, [verifySunoConnection, adoptDevSession]);
 
   useEffect(() => {
     if (!sunoCookie?.trim()) {
@@ -339,10 +401,23 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
     }
     verifySunoConnection(sunoCookie, { silent: true });
     const timer = window.setInterval(() => {
+      if (import.meta.env.DEV) {
+        // The 1h token lapses while the dev server runs; re-mint from the bridge instead of
+        // flipping to "lost" and staying there.
+        void (async () => {
+          const refreshed = await adoptDevSession();
+          if (refreshed && refreshed !== sunoCookie) {
+            setSunoCookie(refreshed);
+            return;
+          }
+          verifySunoConnection(sunoCookie, { silent: true });
+        })();
+        return;
+      }
       verifySunoConnection(sunoCookie, { silent: true });
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [sunoCookie, verifySunoConnection]);
+  }, [sunoCookie, verifySunoConnection, adoptDevSession]);
 
   useEffect(() => {
     localStorage.setItem('local_library_mode', useCachedData ? '1' : '0');
@@ -393,8 +468,14 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
 
   useEffect(() => {
     try {
-      localStorage.setItem('suno_history', JSON.stringify(history));
-    } catch {}
+      const result = saveHistorySafely(history);
+      setHistoryStorageWarning(result.warning ?? '');
+      if (result.trimmed > 0 && result.saved.length !== history.length) {
+        setHistory(result.saved);
+      }
+    } catch (error) {
+      console.warn('History persistence failed', error);
+    }
   }, [history]);
 
   useEffect(() => {
@@ -464,6 +545,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
   }, [providerConfig]);
 
   const mergeClips = (newClips: SunoClip[]) => {
+      mirrorHistoryToLibrary(newClips).catch(err => console.warn('history mirror failed', err));
       setHistory(prev => {
         const nonDrafts = prev.filter(p => !p.id.startsWith('draft_'));
         const map = new Map<string, SunoClip>(nonDrafts.map(c => [c.id, c]));
@@ -572,7 +654,8 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
         setOfflineProgress(progress.message);
       });
       setUseCachedData(true);
-      setOfflineProgress(`Cached: +${result.added} new, ${result.updated} updated, ${result.unchanged} unchanged`);
+      const goneSegment = result.markedGone > 0 ? `, ${result.markedGone} no longer on Suno` : '';
+      setOfflineProgress(`Cached: +${result.added} new, ${result.updated} updated, ${result.unchanged} unchanged${goneSegment}`);
       await handleFetchHistory('all');
     } catch (error: any) {
       console.error('Local library cache sync failed', error);
@@ -851,6 +934,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
                     offlineProgress={offlineProgress}
                     useCachedData={useCachedData}
                     onToggleUseCachedData={setUseCachedData}
+                    storageWarning={historyStorageWarning}
                 />
               );
           case 'visualizer':
@@ -862,12 +946,23 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
                     providerConfig={providerConfig}
                   />
               );
+          case 'library':
+              return <LibrarySection history={history} />;
           case 'albums':
               return <AlbumsSection history={history} />;
           case 'album-builder':
               return <AlbumBuilderSection history={history} />;
           case 'web-audio-master':
               return <WebAudioMasterSection />;
+          case 'cover-matrix':
+              return (
+                <CoverMatrixSection
+                  sunoCookie={sunoCookie}
+                  sunoModel={sunoModel}
+                  sunoCredits={sunoCredits}
+                  onOpenSettings={() => setIsSettingsModalOpen(true)}
+                />
+              );
           case 'generator':
           default:
               return (
@@ -911,7 +1006,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
                             <>
                                 <div className="w-16 h-16 rounded-full bg-[var(--app-panel)] mb-4 flex items-center justify-center">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 opacity-50">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
                                 </svg>
                                 </div>
                                 <p className="text-lg font-medium">Ready to Generate</p>

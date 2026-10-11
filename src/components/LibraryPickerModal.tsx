@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { OfflineTrack, TrackVariant } from '../services/offlineDb';
+import { OfflineTrack, TrackVariant, isTrackArchived } from '../services/offlineDb';
+import { ArchivedChip, GoneChip, formatTrackDuration } from './LibrarySection/LibraryCard';
 
 export interface LibrarySelection {
   track: OfflineTrack;
@@ -17,6 +18,8 @@ const LibraryPickerModal: React.FC<LibraryPickerModalProps> = ({ isOpen, onClose
   const [tracks, setTracks] = useState<OfflineTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [menuTrackId, setMenuTrackId] = useState<string | null>(null);
+  const [busyTrackId, setBusyTrackId] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -27,13 +30,47 @@ const LibraryPickerModal: React.FC<LibraryPickerModalProps> = ({ isOpen, onClose
   const loadTracks = async () => {
     setLoading(true);
     try {
-      const { listAllTracks } = await import('../services/offlineDb');
-      const allTracks = await listAllTracks();
-      setTracks(allTracks);
+      const { listTracksByStatus } = await import('../services/offlineDb');
+      const buckets = await listTracksByStatus();
+      // Active tracks are selectable; archived tracks trail the list, dimmed, with a Restore action only.
+      setTracks([...buckets.active, ...buckets.archived]);
     } catch (error) {
       console.error('Failed to load tracks:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleArchive = async (track: OfflineTrack) => {
+    if (busyTrackId) return;
+    setBusyTrackId(track.id);
+    setMenuTrackId(null);
+    try {
+      const [{ archiveTrack }, { collectTrackAssetUrls, requestEvictAssets }] = await Promise.all([
+        import('../services/offlineDb'),
+        import('../services/offlineSyncService'),
+      ]);
+      await archiveTrack(track.id);
+      await requestEvictAssets(collectTrackAssetUrls(track));
+    } catch (error) {
+      console.error('Failed to archive track:', error);
+    } finally {
+      setBusyTrackId(null);
+      await loadTracks();
+    }
+  };
+
+  const handleRestore = async (track: OfflineTrack) => {
+    if (busyTrackId) return;
+    setBusyTrackId(track.id);
+    try {
+      const { restoreTrack } = await import('../services/offlineDb');
+      await restoreTrack(track.id);
+    } catch (error) {
+      console.error('Failed to restore track:', error);
+    } finally {
+      setBusyTrackId(null);
+      await loadTracks();
     }
   };
 
@@ -103,14 +140,22 @@ const LibraryPickerModal: React.FC<LibraryPickerModalProps> = ({ isOpen, onClose
             <div className="space-y-1">
               {filteredTracks.map((track) => {
                 const variants = [...(track.variants || [])].sort((a, b) => b.createdAt - a.createdAt);
+                const archived = isTrackArchived(track);
+                const busy = busyTrackId === track.id;
+                const duration = formatTrackDuration(track.metadata.durationMs);
                 return (
                   <div
                     key={track.id}
-                    className="rounded-lg border border-transparent hover:border-[var(--app-panel-border)] bg-transparent hover:bg-[var(--app-panel)]/40 transition-colors"
+                    data-track-id={track.id}
+                    data-track-status={archived ? 'archived' : 'active'}
+                    className={`rounded-lg border border-transparent hover:border-[var(--app-panel-border)] bg-transparent hover:bg-[var(--app-panel)]/40 transition-colors ${archived ? 'opacity-60' : ''}`}
                   >
+                    <div className="flex items-stretch">
                     <button
                       onClick={() => handleSelect(track)}
-                      className="w-full flex items-center gap-3 p-3 text-left group"
+                      disabled={archived || busy}
+                      data-track-action="select"
+                      className="flex-grow min-w-0 flex items-center gap-3 p-3 text-left group disabled:cursor-not-allowed"
                     >
                       <div className="w-12 h-12 rounded-md bg-slate-800 flex-shrink-0 overflow-hidden">
                         {track.imageUrl ? (
@@ -126,26 +171,68 @@ const LibraryPickerModal: React.FC<LibraryPickerModalProps> = ({ isOpen, onClose
                         )}
                       </div>
                       <div className="flex-grow min-w-0">
-                        <p className="text-white font-medium truncate group-hover:text-emerald-400 transition-colors">
-                          {track.title}
-                        </p>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <p className={`font-medium truncate transition-colors ${archived ? 'text-slate-300' : 'text-white group-hover:text-emerald-400'}`}>
+                            {track.title}
+                          </p>
+                          {archived && <ArchivedChip />}
+                          {!archived && track.goneFromRemote && <GoneChip />}
+                        </div>
                         <p className="text-slate-500 text-sm truncate">
                           {track.metadata.tags.slice(0, 3).join(', ') || 'No tags'}
                         </p>
                       </div>
                       <div className="flex-shrink-0 text-right">
                         <div className="text-slate-500 text-xs">
-                          {track.metadata.durationMs ? (
-                            <span>{Math.floor(track.metadata.durationMs / 60000)}:{String(Math.floor((track.metadata.durationMs % 60000) / 1000)).padStart(2, '0')}</span>
-                          ) : null}
+                          {duration ? <span>{duration}</span> : null}
                         </div>
-                        <div className="mt-1 text-[10px] uppercase tracking-wide text-emerald-400/80">
-                          Original
+                        <div className={`mt-1 text-[10px] uppercase tracking-wide ${archived ? 'text-slate-500' : 'text-emerald-400/80'}`}>
+                          {archived ? 'Archived' : 'Original'}
                         </div>
                       </div>
                     </button>
 
-                    {variants.length > 0 && (
+                    <div className="flex-shrink-0 flex items-center gap-1 pr-2">
+                      {archived ? (
+                        <button
+                          type="button"
+                          onClick={() => handleRestore(track)}
+                          disabled={busy}
+                          data-track-action="restore"
+                          className="px-2.5 py-1 text-xs font-semibold rounded-md border border-emerald-400/70 text-emerald-200 hover:bg-emerald-500/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {busy ? 'Restoring…' : 'Restore'}
+                        </button>
+                      ) : (
+                        <>
+                          {menuTrackId === track.id && (
+                            <button
+                              type="button"
+                              onClick={() => handleArchive(track)}
+                              disabled={busy}
+                              data-track-action="archive"
+                              className="px-2.5 py-1 text-xs font-semibold rounded-md border border-amber-400/70 text-amber-200 hover:bg-amber-500/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                              title="Archive this track and free its cached audio/cover"
+                            >
+                              {busy ? 'Archiving…' : 'Archive'}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label="Track actions"
+                            aria-expanded={menuTrackId === track.id}
+                            onClick={() => setMenuTrackId((current) => (current === track.id ? null : track.id))}
+                            disabled={busy}
+                            className="w-8 h-8 rounded-md text-slate-400 hover:text-white hover:bg-[var(--app-panel)] disabled:opacity-40 flex items-center justify-center text-lg leading-none"
+                          >
+                            ⋮
+                          </button>
+                        </>
+                      )}
+                    </div>
+                    </div>
+
+                    {!archived && variants.length > 0 && (
                       <div className="px-3 pb-3">
                         <div className="ml-[60px] flex flex-wrap gap-2">
                           {variants.slice(0, 4).map((variant) => (

@@ -105,7 +105,7 @@ export interface GenerationOptions {
   objectivePreset?: AlbumObjectivePreset;
 }
 
-export type ViewMode = 'generator' | 'history' | 'activity-history' | 'albums' | 'album-builder' | 'visualizer' | 'web-audio-master';
+export type ViewMode = 'generator' | 'cover-matrix' | 'history' | 'library' | 'activity-history' | 'albums' | 'album-builder' | 'visualizer' | 'web-audio-master';
 
 export type Qt6Style =
   | 'wave'
@@ -170,3 +170,48 @@ export interface LibraryAlbum {
   updatedAt: string;
   songs: AlbumSongRef[];
 }
+
+export type VarietyLevel = 0 | 1 | 2 | 3 | 4;
+
+export interface SunoCoverGenerationOptions {
+  songId: string;
+  title: string;
+  prompt?: string;
+  tags?: string;
+  negativeTags?: string;
+  model?: string;
+  audioWeight?: number; // 0.0 - 1.0 (Audio Influence / ai)
+  styleWeight?: number; // 0.0 - 1.0 (Style Influence / si)
+  weirdness?: number; // 0.0 - 1.0 (Weirdness / w)
+  variety?: VarietyLevel; // 0=Off, 1=Normal, 2=High, 3=Extra, 4=Max (v)
+  isMaxMode?: boolean; // false=maxoff, true=maxon
+  makeInstrumental?: boolean;
+}
+
+export interface CoverSliderMatrixConfig {
+  baseSongId: string;
+  titlePrefix: string;
+  model: string;
+  tags?: string;
+  lyrics?: string;
+  varieties: VarietyLevel[]; // e.g. [0, 1, 2, 3, 4]
+  audioInfluences: number[]; // 0 - 100, e.g. [0, 25, 50, 75, 100]
+  styleInfluences: number[]; // 0 - 100, e.g. [50]
+  weirdnessValues: number[]; // 0 - 100, e.g. [50]
+  maxModes: boolean[]; // e.g. [false] or [false, true]
+  delayBetweenMs?: number; // delay between API requests to avoid rate limit
+}
+
+export interface CoverSliderMatrixItem {
+  id: string;
+  title: string;
+  variety: VarietyLevel;
+  audioInfluence: number; // 0 - 100
+  styleInfluence: number; // 0 - 100
+  weirdness: number; // 0 - 100
+  isMaxMode: boolean;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
+  clipIds?: string[];
+  error?: string;
+}
+

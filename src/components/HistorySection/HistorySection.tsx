@@ -20,6 +20,8 @@ interface HistorySectionProps {
   offlineProgress?: string;
   useCachedData: boolean;
   onToggleUseCachedData: (value: boolean) => void;
+  /** One-line note shown under the header when history persistence had to trim or failed. */
+  storageWarning?: string;
 }
 
 // Helper to map API response to SunoClip (reused logic)
@@ -77,6 +79,7 @@ const HistorySection: React.FC<HistorySectionProps> = ({
   offlineProgress,
   useCachedData,
   onToggleUseCachedData,
+  storageWarning,
 }) => {
   const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   
@@ -235,6 +238,15 @@ const HistorySection: React.FC<HistorySectionProps> = ({
             isDownloadingOfflineCache={isDownloadingOfflineCache}
             offlineProgress={offlineProgress}
         />
+        {storageWarning && (
+          <p
+            data-testid="history-storage-warning"
+            role="status"
+            className="text-xs text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded-md px-3 py-2"
+          >
+            {storageWarning}
+          </p>
+        )}
         <div className="flex items-center gap-3 border border-[var(--app-panel-border)] bg-black/40 px-3 py-2 rounded-md w-fit">
           <span className="text-[11px] uppercase tracking-wider text-slate-300">Library Source</span>
           <button
