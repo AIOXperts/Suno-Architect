@@ -16,10 +16,14 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('message', (event) => {
     const msg = event.data;
-    if (!msg || msg.type !== 'CACHE_ASSETS' || !Array.isArray(msg.urls)) return;
+    if (!msg || !Array.isArray(msg.urls)) return;
 
     const { urls, requestId } = msg;
-    event.waitUntil(cacheAssets(urls, requestId));
+    if (msg.type === 'CACHE_ASSETS') {
+        event.waitUntil(cacheAssets(urls, requestId));
+    } else if (msg.type === 'EVICT_ASSETS') {
+        event.waitUntil(evictAssets(urls, requestId));
+    }
 });
 
 self.addEventListener('fetch', (event) => {
@@ -77,6 +81,26 @@ async function cacheAssets(urls, requestId) {
     }
 
     postProgress({ requestId, completed: total, total, done: true });
+}
+
+async function evictAssets(urls, requestId) {
+    let evicted = 0;
+    const total = urls.length;
+    try {
+        const cache = await caches.open(ASSET_CACHE);
+        for (const assetUrl of urls) {
+            try {
+                const deleted = await cache.delete(assetUrl, { ignoreVary: true, ignoreSearch: false });
+                if (deleted) evicted += 1;
+            } catch {
+                // Continue on partial failures.
+            }
+        }
+    } catch {
+        // Cache storage unavailable; report zero evictions.
+    }
+
+    postProgress({ requestId, completed: total, total, evicted, done: true });
 }
 
 async function postProgress(payload) {

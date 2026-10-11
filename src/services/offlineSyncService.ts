@@ -1,14 +1,18 @@
 import { getLyricAlignment, getSunoClip, getSunoFeedAll, getSunoPlaylist } from './sunoApi';
 import { generateLrc, generateSrt, groupWordsByTiming, stripMetaTags } from '../utils/lyrics';
+import type { SunoClip } from '../types';
 import {
   OfflinePlaylist,
   OfflineTrack,
   getSyncMeta,
+  getTrackById,
   listAllTracks,
   setSyncMeta,
   upsertPlaylists,
   upsertTracks,
 } from './offlineDb';
+
+const ASSET_CACHE_NAME = 'suno-architect-assets-v1';
 
 export interface SyncProgress {
   phase: 'fetching' | 'diffing' | 'upserting' | 'caching-assets' | 'done';
@@ -22,6 +26,16 @@ export interface SyncResult {
   updated: number;
   unchanged: number;
   failedAssets: number;
+  /** Local active tracks that were not present in the remote feed and got flagged goneFromRemote. */
+  markedGone: number;
+}
+
+export interface SyncDiff {
+  toWrite: OfflineTrack[];
+  markedGone: OfflineTrack[];
+  added: number;
+  updated: number;
+  unchanged: number;
 }
 
 const LAST_SYNC_META_KEY = 'lastSyncAt';
@@ -57,8 +71,58 @@ const buildTrack = (clip: any, now: number, prev?: OfflineTrack): OfflineTrack =
     raw: clip,
     createdAt: prev?.createdAt || now,
     updatedAt: now,
+    variants: prev?.variants,
+    // Preserve local archive state; a remote sighting always clears the "gone" flag.
+    archivedAt: prev?.archivedAt,
+    goneFromRemote: false,
   };
 };
+
+const isArchived = (track: OfflineTrack | undefined): boolean => typeof track?.archivedAt === 'number';
+
+/**
+ * Pure diff of local library vs remote feed.
+ * - remote clips without an `id` are skipped
+ * - archived local tracks are never written/resurrected
+ * - active local tracks absent from remote get goneFromRemote=true (updatedAt unchanged)
+ * - tracks present in remote get goneFromRemote cleared via buildTrack
+ */
+export function computeSyncDiff(local: OfflineTrack[], remote: any[], now: number): SyncDiff {
+  const localMap = new Map(local.map((t) => [t.id, t]));
+  const seenRemote = new Set<string>();
+  const toWrite: OfflineTrack[] = [];
+  let added = 0;
+  let updated = 0;
+  let unchanged = 0;
+
+  for (const clip of Array.isArray(remote) ? remote : []) {
+    const id = clip?.id;
+    if (typeof id !== 'string' || !id) continue;
+    seenRemote.add(id);
+    const prev = localMap.get(id);
+    if (isArchived(prev)) continue;
+    const next = buildTrack(clip, now, prev);
+    if (!prev) {
+      added += 1;
+      toWrite.push(next);
+    } else if (!isTrackEqual(prev, next) || prev.goneFromRemote === true) {
+      updated += 1;
+      toWrite.push(next);
+    } else {
+      unchanged += 1;
+    }
+  }
+
+  const markedGone: OfflineTrack[] = [];
+  for (const track of local) {
+    if (seenRemote.has(track.id)) continue;
+    if (isArchived(track)) continue;
+    if (track.goneFromRemote === true) continue;
+    markedGone.push({ ...track, goneFromRemote: true });
+  }
+
+  return { toWrite, markedGone, added, updated, unchanged };
+}
 
 const isTrackEqual = (a: OfflineTrack, b: OfflineTrack) => {
   return (
@@ -108,14 +172,74 @@ const enrichTrackLyricsAndCaptions = async (track: OfflineTrack, cookie: string)
   }
 };
 
+/** Pure: the cacheable asset URLs belonging to a single track (audio + image when present). */
+export const collectTrackAssetUrls = (track: Pick<OfflineTrack, 'audioUrl' | 'imageUrl'> | null | undefined): string[] => {
+  const urls: string[] = [];
+  if (track?.audioUrl) urls.push(track.audioUrl);
+  if (track?.imageUrl && !urls.includes(track.imageUrl)) urls.push(track.imageUrl);
+  return urls;
+};
+
 const collectAssetUrls = (tracks: OfflineTrack[]): string[] => {
   const urls = new Set<string>();
   for (const track of tracks) {
-    if (track.audioUrl) urls.add(track.audioUrl);
-    if (track.imageUrl) urls.add(track.imageUrl);
+    for (const url of collectTrackAssetUrls(track)) urls.add(url);
   }
   return [...urls];
 };
+
+const evictAssetsDirect = async (urls: string[]): Promise<number> => {
+  if (typeof caches === 'undefined') return 0;
+  try {
+    const cache = await caches.open(ASSET_CACHE_NAME);
+    let evicted = 0;
+    for (const url of urls) {
+      try {
+        if (await cache.delete(url, { ignoreVary: true })) evicted += 1;
+      } catch {
+        // ignore individual failures
+      }
+    }
+    return evicted;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * Ask the service worker to drop the given URLs from the asset cache.
+ * Resolves with the number of cache entries actually deleted. Falls back to
+ * direct Cache API deletion when no SW controller is available; resolves 0
+ * when there is nothing to do or no caches API.
+ */
+export async function requestEvictAssets(urls: string[]): Promise<number> {
+  const unique = [...new Set((urls || []).filter(Boolean))];
+  if (!unique.length) return 0;
+
+  const hasSw = typeof navigator !== 'undefined' && 'serviceWorker' in navigator && !!navigator.serviceWorker;
+  if (!hasSw) return evictAssetsDirect(unique);
+
+  let registration: ServiceWorkerRegistration | undefined;
+  try {
+    registration = await navigator.serviceWorker.ready;
+  } catch {
+    registration = undefined;
+  }
+  const active = registration?.active;
+  if (!active) return evictAssetsDirect(unique);
+
+  const requestId = `evict-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise<number>((resolve) => {
+    const onMessage = (event: MessageEvent) => {
+      const data = event.data;
+      if (!data || data.type !== 'CACHE_PROGRESS' || data.requestId !== requestId || !data.done) return;
+      navigator.serviceWorker.removeEventListener('message', onMessage);
+      resolve(typeof data.evicted === 'number' ? data.evicted : 0);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    active.postMessage({ type: 'EVICT_ASSETS', urls: unique, requestId });
+  });
+}
 
 async function requestCacheAssets(urls: string[], onProgress?: (p: SyncProgress) => void): Promise<number> {
   if (!urls.length || !('serviceWorker' in navigator)) return 0;
@@ -203,28 +327,15 @@ export async function downloadAccountCache(
 
   onProgress?.({ phase: 'diffing', completed: 0, total: remoteClips.length, message: 'Diffing remote vs local state…' });
   const localTracks = await listAllTracks();
-  const localMap = new Map(localTracks.map((t) => [t.id, t]));
 
   const now = Date.now();
-  const toWrite: OfflineTrack[] = [];
-  let added = 0;
-  let updated = 0;
-  let unchanged = 0;
-
-  remoteClips.forEach((clip: any, idx: number) => {
-    const prev = localMap.get(clip.id);
-    const next = buildTrack(clip, now, prev);
-    if (!prev) {
-      added += 1;
-      toWrite.push(next);
-    } else if (!isTrackEqual(prev, next)) {
-      updated += 1;
-      toWrite.push(next);
-    } else {
-      unchanged += 1;
-    }
-    onProgress?.({ phase: 'diffing', completed: idx + 1, total: remoteClips.length, message: `Compared ${idx + 1}/${remoteClips.length} tracks` });
-  });
+  const diff = computeSyncDiff(localTracks, remoteClips, now);
+  const { toWrite, added, updated, unchanged } = diff;
+  // SAFETY GATE: an empty remote feed with existing local rows is treated as a partial
+  // fetch failure — never flag everything as gone in that case.
+  const markedGoneRows = remoteClips.length === 0 && localTracks.length > 0 ? [] : diff.markedGone;
+  const markedGone = markedGoneRows.length;
+  onProgress?.({ phase: 'diffing', completed: remoteClips.length, total: remoteClips.length, message: `Compared ${remoteClips.length}/${remoteClips.length} tracks` });
 
   const enrichedTracks: OfflineTrack[] = [];
   for (let i = 0; i < toWrite.length; i += 1) {
@@ -241,6 +352,7 @@ export async function downloadAccountCache(
 
   onProgress?.({ phase: 'upserting', completed: 0, total: enrichedTracks.length, message: 'Persisting metadata to IndexedDB…' });
   await upsertTracks(enrichedTracks);
+  await upsertTracks(markedGoneRows);
   await upsertPlaylists(remotePlaylists);
   await setSyncMeta(LAST_SYNC_META_KEY, now);
 
@@ -249,7 +361,114 @@ export async function downloadAccountCache(
   const failedAssets = await requestCacheAssets(assetUrls, onProgress);
 
   onProgress?.({ phase: 'done', completed: 1, total: 1, message: 'Account cache is up to date.' });
-  return { added, updated, unchanged, failedAssets };
+  return { added, updated, unchanged, failedAssets, markedGone };
+}
+
+const isEmptyValue = (v: unknown): boolean =>
+  v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+
+/** Pure: map a history (localStorage) clip onto the OfflineTrack shape. Tolerates missing metadata. */
+export function mapHistoryClipToOfflineTrack(clip: SunoClip, now: number = Date.now()): OfflineTrack {
+  const metadata: Partial<SunoClip['metadata']> = (clip as any)?.metadata || {};
+  const prompt = metadata.prompt || '';
+  return {
+    id: clip.id,
+    sunoId: clip.id,
+    title: clip.title || 'Untitled',
+    audioUrl: `https://cdn1.suno.ai/${clip.id}.mp3`,
+    imageUrl: clip.imageLargeUrl || clip.imageUrl || '',
+    lyricsText: prompt,
+    lrcContent: clip.lrcContent || '',
+    srtContent: clip.srtContent || '',
+    metadata: {
+      tags: toTags(metadata.tags),
+      prompt,
+      durationMs: Math.round((metadata.duration || 0) * 1000),
+    },
+    cachedLocally: false,
+    raw: clip,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export interface MirrorHistoryResult {
+  created: number;
+  merged: number;
+  skipped: number;
+}
+
+/**
+ * Mirror history clips into the IndexedDB library.
+ * - `draft_` ids are skipped
+ * - missing rows are created
+ * - existing rows only get EMPTY fields filled; non-empty values (lrc/srt/variants/archivedAt/
+ *   goneFromRemote/title/...) are never overwritten. Untouched rows are not rewritten.
+ */
+export async function mirrorHistoryToLibrary(clips: SunoClip[]): Promise<MirrorHistoryResult> {
+  const result: MirrorHistoryResult = { created: 0, merged: 0, skipped: 0 };
+  const now = Date.now();
+  const toUpsert: OfflineTrack[] = [];
+
+  for (const clip of Array.isArray(clips) ? clips : []) {
+    const id = clip?.id;
+    if (typeof id !== 'string' || !id || id.startsWith('draft_')) {
+      result.skipped += 1;
+      continue;
+    }
+    const mapped = mapHistoryClipToOfflineTrack(clip, now);
+    const existing = await getTrackById(id);
+    if (!existing) {
+      toUpsert.push(mapped);
+      result.created += 1;
+      continue;
+    }
+
+    let changed = false;
+    const merged: OfflineTrack = { ...existing, metadata: { ...existing.metadata } };
+    const fillable: Array<keyof Pick<OfflineTrack, 'title' | 'audioUrl' | 'imageUrl' | 'lyricsText' | 'lrcContent' | 'srtContent' | 'raw'>> = [
+      'title',
+      'audioUrl',
+      'imageUrl',
+      'lyricsText',
+      'lrcContent',
+      'srtContent',
+      'raw',
+    ];
+    for (const key of fillable) {
+      if (isEmptyValue(existing[key]) && !isEmptyValue(mapped[key])) {
+        (merged as any)[key] = mapped[key];
+        changed = true;
+      }
+    }
+    const existingMeta = existing.metadata || ({} as OfflineTrack['metadata']);
+    if (isEmptyValue(existingMeta.tags) && mapped.metadata.tags.length) {
+      merged.metadata.tags = mapped.metadata.tags;
+      changed = true;
+    }
+    if (isEmptyValue(existingMeta.prompt) && mapped.metadata.prompt) {
+      merged.metadata.prompt = mapped.metadata.prompt;
+      changed = true;
+    }
+    if (!existingMeta.durationMs && mapped.metadata.durationMs) {
+      merged.metadata.durationMs = mapped.metadata.durationMs;
+      changed = true;
+    }
+    if (!merged.metadata.tags) merged.metadata.tags = [];
+    if (merged.metadata.prompt === undefined) merged.metadata.prompt = '';
+    if (merged.metadata.durationMs === undefined) merged.metadata.durationMs = 0;
+
+    if (changed) {
+      merged.updatedAt = now;
+      toUpsert.push(merged);
+      result.merged += 1;
+    } else {
+      result.skipped += 1;
+    }
+  }
+
+  await upsertTracks(toUpsert);
+  return result;
 }
 
 export const getLastAccountSync = async (): Promise<number | undefined> => {
