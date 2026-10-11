@@ -7,7 +7,7 @@ import { DeEsser } from './dsp/fx/deesser';
 import { TransientShaper } from './dsp/fx/transient_shaper';
 import { Metering } from './dsp/fx/metering';
 import { Reverb } from './dsp/fx/reverb';
-import { dbToLinear } from './dsp/utils';
+import { BiquadFilter, dbToLinear } from './dsp/utils';
 
 self.onmessage = async (e) => {
   const { id, data } = e.data;
@@ -30,6 +30,12 @@ self.onmessage = async (e) => {
     const reverb = new Reverb(sampleRate);
 
     limiter.setCeiling(settings.ceiling ?? -1);
+    limiter.setTruePeakMode(!!settings.truePeakLimit);
+
+    // Subsonic cleanup: high-pass at 30 Hz to remove rumble/infrasonic energy
+    // that wastes headroom and muddies the low end (was a dead setting).
+    const cleanLowEndFilter = new BiquadFilter();
+    cleanLowEndFilter.setHighPass(30, 0.707, sampleRate);
     
     if (settings.tapeWarmth) {
         saturation.setDrive(2.0);
@@ -81,6 +87,12 @@ self.onmessage = async (e) => {
         }
     }
 
+    if (settings.cleanLowEnd) {
+        for (let ch = 0; ch < numChannels; ch++) {
+          for (let i = 0; i < len; i++) channels[ch][i] = cleanLowEndFilter.process(channels[ch][i], ch);
+        }
+    }
+
     saturation.process(channels);
     eq.process(channels);
     
@@ -124,14 +136,16 @@ self.onmessage = async (e) => {
 
     limiter.process(channels);
 
+    // Re-measure after limiting: captures post-limit true peak + final LUFS.
+    metering.reset();
+    metering.process(channels);
     if (measuredLufs == null) {
-      metering.reset();
-      metering.process(channels);
       measuredLufs = metering.getLufs();
     }
+    const measuredTruePeak = metering.getTruePeakDb();
 
     self.postMessage(
-      { id, success: true, result: { channels, measuredLufs } },
+      { id, success: true, result: { channels, measuredLufs, measuredTruePeak } },
       channels.map((c: Float32Array) => c.buffer)
     );
   } catch (err: any) {

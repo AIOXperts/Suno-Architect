@@ -4,6 +4,16 @@ import { ColorEvent, Qt6Style } from '../../types';
 import { AppButton, AppInput, AppSelect, AppTextarea, AppFieldLabel } from '../ui/AppPrimitives';
 import { formatTime } from '../../utils/visualizer';
 
+const SliderRow: React.FC<{ label: string; value: number; display?: string; children: React.ReactNode }> = ({ label, value, display, children }) => (
+  <div>
+    <div className="flex items-center justify-between mb-1">
+      <AppFieldLabel className="!mb-0">{label}</AppFieldLabel>
+      <span className="text-[10px] font-mono text-slate-400">{display ?? value}</span>
+    </div>
+    {children}
+  </div>
+);
+
 interface VisualizerSettingsProps {
     activeTab: 'style' | 'timeline' | 'dsp';
     savedPresets: Array<{ id: string; name: string; createdAt: string }>;
@@ -217,30 +227,27 @@ const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
             <div>
               <AppFieldLabel>Active Color</AppFieldLabel>
               <div className="flex items-center gap-2">
-                <input type="color" value={activeColor} onChange={(e) => setActiveColor(e.target.value)} className="w-8 h-8 rounded border border-slate-700 bg-transparent cursor-pointer" />
+                <input type="color" value={activeColor} onChange={(e) => setActiveColor(e.target.value)} aria-label="Active color" className="w-8 h-8 rounded border border-slate-700 bg-transparent cursor-pointer" />
                 <span className="text-[10px] text-slate-400 font-mono">{activeColor}</span>
               </div>
             </div>
             <div>
               <AppFieldLabel>Inactive Color</AppFieldLabel>
               <div className="flex items-center gap-2">
-                <input type="color" value={inactiveColor} onChange={(e) => setInactiveColor(e.target.value)} className="w-8 h-8 rounded border border-slate-700 bg-transparent cursor-pointer" />
+                <input type="color" value={inactiveColor} onChange={(e) => setInactiveColor(e.target.value)} aria-label="Inactive color" className="w-8 h-8 rounded border border-slate-700 bg-transparent cursor-pointer" />
                 <span className="text-[10px] text-slate-400 font-mono">{inactiveColor}</span>
               </div>
             </div>
           </div>
-          <div>
-            <AppFieldLabel>Inactive Opacity</AppFieldLabel>
+          <SliderRow label="Inactive Opacity" value={inactiveOpacity}>
             <input type="range" min="0.05" max="1" step="0.05" value={inactiveOpacity} onChange={(e) => setInactiveOpacity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-          </div>
-          <div>
-            <AppFieldLabel>Scroll Smoothing</AppFieldLabel>
+          </SliderRow>
+          <SliderRow label="Scroll Smoothing" value={smoothingFactor}>
             <input type="range" min="0.01" max="0.5" step="0.01" value={smoothingFactor} onChange={(e) => setSmoothingFactor(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-          </div>
-          <div>
-            <AppFieldLabel>Vertical Position</AppFieldLabel>
+          </SliderRow>
+          <SliderRow label="Vertical Position" value={verticalOffset}>
             <input type="range" min="-0.4" max="0.4" step="0.01" value={verticalOffset} onChange={(e) => setVerticalOffset(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-          </div>
+          </SliderRow>
         </div>
 
         <div className="border border-[var(--app-panel-border)] rounded-xl p-3 space-y-3 bg-slate-950/20">
@@ -262,14 +269,12 @@ const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
               </AppSelect>
             </div>
           </div>
-          <div>
-            <AppFieldLabel>Logo Size</AppFieldLabel>
+          <SliderRow label="Logo Size" value={logoScale}>
             <input type="range" min="0.08" max="0.45" step="0.01" value={logoScale} onChange={(e) => setLogoScale(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-          </div>
-          <div>
-            <AppFieldLabel>Logo Opacity</AppFieldLabel>
+          </SliderRow>
+          <SliderRow label="Logo Opacity" value={logoOpacity}>
             <input type="range" min="0.2" max="1" step="0.05" value={logoOpacity} onChange={(e) => setLogoOpacity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-          </div>
+          </SliderRow>
           <div>
             <AppFieldLabel>Logo Visualizer</AppFieldLabel>
             <AppSelect value={logoVisualizerMode} onChange={(e) => {
@@ -285,18 +290,15 @@ const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
           </div>
           {logoPulseEnabled && (
             <div className="grid grid-cols-3 gap-2">
-              <div>
-                <AppFieldLabel>Pulse Size</AppFieldLabel>
+              <SliderRow label="Pulse Size" value={logoPulseScale}>
                 <input type="range" min="0.35" max="2.8" step="0.05" value={logoPulseScale} onChange={(e) => setLogoPulseScale(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-              </div>
-              <div>
-                <AppFieldLabel>Pulse Gap</AppFieldLabel>
+              </SliderRow>
+              <SliderRow label="Pulse Gap" value={logoPulseGap}>
                 <input type="range" min="-40" max="80" step="1" value={logoPulseGap} onChange={(e) => setLogoPulseGap(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-              </div>
-              <div>
-                <AppFieldLabel>Sensitivity</AppFieldLabel>
+              </SliderRow>
+              <SliderRow label="Sensitivity" value={logoPulseSensitivity}>
                 <input type="range" min="0.5" max="3" step="0.1" value={logoPulseSensitivity} onChange={(e) => setLogoPulseSensitivity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-              </div>
+              </SliderRow>
             </div>
           )}
         </div>
@@ -472,22 +474,19 @@ const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
                 </AppSelect>
               </div>
             )}
-            <div>
-              <AppFieldLabel>Sensitivity (Gain)</AppFieldLabel>
+            <SliderRow label="Sensitivity (Gain)" value={qt6Sensitivity}>
               <input type="range" min="0.5" max="3.0" step="0.1" value={qt6Sensitivity} onChange={(e) => setQt6Sensitivity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-            </div>
+            </SliderRow>
             {showsLedSegmentsControl && (
-              <div>
-                <AppFieldLabel>LED Segments</AppFieldLabel>
+              <SliderRow label="LED Segments" value={qt6LedSegments}>
                 <input type="range" min="8" max="24" step="1" value={qt6LedSegments} onChange={(e) => setQt6LedSegments(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-              </div>
+              </SliderRow>
             )}
             {showsSpectrogramSpeedControl && (
               <>
-                <div>
-                  <AppFieldLabel>Scroll Speed</AppFieldLabel>
+                <SliderRow label="Scroll Speed" value={qt6SpectrogramSpeed}>
                   <input type="range" min="1" max="4" step="1" value={qt6SpectrogramSpeed} onChange={(e) => setQt6SpectrogramSpeed(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-                </div>
+                </SliderRow>
                 <div>
                   <AppFieldLabel>Palette</AppFieldLabel>
                   <AppSelect value={qt6SpectrogramPalette} onChange={(e) => setQt6SpectrogramPalette(e.target.value as any)} className="h-9">
@@ -500,16 +499,14 @@ const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
               </>
             )}
             {showsParticleDensityControl && (
-              <div>
-                <AppFieldLabel>Particle Density</AppFieldLabel>
+              <SliderRow label="Particle Density" value={qt6ParticleDensity}>
                 <input type="range" min="0.5" max="3" step="0.1" value={qt6ParticleDensity} onChange={(e) => setQt6ParticleDensity(parseFloat(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-              </div>
+              </SliderRow>
             )}
             {showsRingCountControl && (
-              <div>
-                <AppFieldLabel>Ring Count</AppFieldLabel>
+              <SliderRow label="Ring Count" value={qt6RingCount}>
                 <input type="range" min="2" max="5" step="1" value={qt6RingCount} onChange={(e) => setQt6RingCount(Number(e.target.value))} className="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-[var(--app-accent)]" />
-              </div>
+              </SliderRow>
             )}
           </div>
         </div>
@@ -541,11 +538,11 @@ const VisualizerSettings: React.FC<VisualizerSettingsProps> = ({
                 </div>
                 <div>
                   <label className="text-[9px] text-slate-500 block">Active</label>
-                  <input type="color" value={event.activeColor} onChange={(e) => onUpdateColorEvent(idx, { ...event, activeColor: e.target.value })} className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0" />
+                  <input type="color" value={event.activeColor} onChange={(e) => onUpdateColorEvent(idx, { ...event, activeColor: e.target.value })} aria-label="Event active color" className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0" />
                 </div>
                 <div>
                   <label className="text-[9px] text-slate-500 block">Inactive</label>
-                  <input type="color" value={event.inactiveColor} onChange={(e) => onUpdateColorEvent(idx, { ...event, inactiveColor: e.target.value })} className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0" />
+                  <input type="color" value={event.inactiveColor} onChange={(e) => onUpdateColorEvent(idx, { ...event, inactiveColor: e.target.value })} aria-label="Event inactive color" className="w-6 h-6 rounded cursor-pointer bg-transparent border-none p-0" />
                 </div>
                 <button onClick={() => onRemoveColorEvent(idx)} className="ml-auto text-red-400 hover:text-red-300 p-1 hover:bg-red-900/20 rounded" title="Remove">
                   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">

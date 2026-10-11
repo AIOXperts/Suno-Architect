@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept C — Command Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0a;
+  --bg-elevated:#111;
+  --bg-panel:#151515;
+  --bg-input:#0d0d0d;
+  --border:#222;
+  --border-light:#2a2a2a;
+  --text:#d4d4d4;
+  --text-sec:#888;
+  --text-muted:#555;
+  --blue:#3b82f6;
+  --blue-dim:rgba(59,130,246,.12);
+  --purple:#a855f7;
+  --purple-dim:rgba(168,85,247,.12);
+  --amber:#f59e0b;
+  --amber-dim:rgba(245,158,11,.12);
+  --green:#22c55e;
+  --green-dim:rgba(34,197,94,.12);
+  --red:#ef4444;
+  --red-dim:rgba(239,68,68,.12);
+  --cyan:#06b6d4;
+  --cyan-dim:rgba(6,182,212,.12);
+  --font:'Outfit',sans-serif;
+  --font-mono:'Space Mono',monospace;
+  --r:6px;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);font-size:13px;line-height:1.4}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-light);border-radius:2px}
+
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ─── Top Bar ─── */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px;height:42px;min-height:42px;
+  background:var(--bg-elevated);border-bottom:1px solid var(--border);
+}
+.topbar-left{display:flex;align-items:center;gap:12px}
+.topbar-id{font-family:var(--font-mono);font-size:11px;font-weight:700;color:var(--cyan);letter-spacing:.02em}
+.topbar-sep{width:1px;height:14px;background:var(--border)}
+.topbar-track{font-size:12px;color:var(--text-sec)}
+.topbar-track span{color:var(--text)}
+.topbar-right{display:flex;gap:4px}
+.tb{
+  padding:5px 10px;font-size:10px;font-weight:600;font-family:var(--font-mono);
+  border:1px solid var(--border);border-radius:var(--r);cursor:pointer;
+  background:var(--bg-panel);color:var(--text-sec);transition:all .12s;
+  text-transform:uppercase;letter-spacing:.06em;
+}
+.tb:hover{border-color:var(--border-light);color:var(--text)}
+.tb.go{background:var(--cyan);color:#000;border-color:var(--cyan)}
+.tb.go:hover{box-shadow:0 0 16px rgba(6,182,212,.3)}
+
+/* ─── Main Grid ─── */
+.main{
+  flex:1;display:grid;
+  grid-template-columns:1fr 1fr;
+  grid-template-rows:1fr auto;
+  gap:1px;background:var(--border);min-height:0;
+}
+
+/* ─── Canvas Section ─── */
+.canvas-section{
+  grid-row:1/3;grid-column:1;
+  background:var(--bg);display:flex;flex-direction:column;
+}
+.canvas-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 12px;background:var(--bg-elevated);border-bottom:1px solid var(--border);
+  font-family:var(--font-mono);font-size:9px;text-transform:uppercase;letter-spacing:.1em;
+}
+.canvas-header-left{display:flex;align-items:center;gap:8px;color:var(--text-muted)}
+.canvas-header-left .live{color:var(--green);display:flex;align-items:center;gap:4px}
+.canvas-header-left .live::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--green);animation:blinker 2s infinite}
+@keyframes blinker{0%,100%{opacity:1}50%{opacity:.3}}
+.canvas-viewport{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  background:#000;position:relative;overflow:hidden;
+}
+.canvas-frame{
+  width:calc(100% - 32px);max-height:calc(100% - 80px);aspect-ratio:16/9;
+  background:linear-gradient(135deg,#0d0d0d,#111);
+  position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  border:1px solid var(--border);
+}
+.viz-bars{display:flex;align-items:flex-end;gap:1.5px;height:50px;opacity:.5}
+.viz-bar{width:2.5px;background:var(--cyan);border-radius:1px 1px 0 0;animation:viz var(--d) ease-in-out infinite alternate}
+@keyframes viz{from{height:var(--a)}to{height:var(--b)}}
+.canvas-frame-label{margin-top:14px;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);letter-spacing:.14em;text-transform:uppercase}
+
+/* Playback */
+.playback-strip{
+  display:flex;align-items:center;gap:10px;padding:8px 12px;
+  background:var(--bg-elevated);border-top:1px solid var(--border);
+}
+.pb-seek{flex:1;height:3px;-webkit-appearance:none;appearance:none;background:var(--border);border-radius:2px;outline:none;cursor:pointer}
+.pb-seek::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--cyan);cursor:pointer}
+.pb-btn{
+  width:26px;height:26px;border-radius:4px;border:1px solid var(--border);
+  background:var(--bg-panel);color:var(--text-sec);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:10px;transition:all .12s;
+}
+.pb-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.pb-time{font-family:var(--font-mono);font-size:10px;color:var(--text-muted)}
+.pb-status{margin-left:auto;font-family:var(--font-mono);font-size:9px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}
+
+/* ─── Panels Grid ─── */
+.panels{
+  grid-column:2;grid-row:1/3;
+  background:var(--bg);display:flex;flex-direction:column;overflow-y:auto;
+}
+
+.panel{
+  border-bottom:1px solid var(--border);
+}
+.panel-head{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;
+  cursor:pointer;transition:background .12s;user-select:none;
+}
+.panel-head:hover{background:var(--bg-elevated)}
+.panel-indicator{width:3px;height:14px;border-radius:1px}
+.panel-indicator.blue{background:var(--blue)}
+.panel-indicator.purple{background:var(--purple)}
+.panel-indicator.amber{background:var(--amber)}
+.panel-indicator.green{background:var(--green)}
+.panel-indicator.red{background:var(--red)}
+.panel-indicator.cyan{background:var(--cyan)}
+.panel-name{
+  font-family:var(--font-mono);font-size:10px;font-weight:700;
+  text-transform:uppercase;letter-spacing:.08em;color:var(--text-sec);flex:1;
+}
+.panel-badge{
+  font-family:var(--font-mono);font-size:9px;padding:1px 6px;border-radius:3px;
+  background:var(--bg);color:var(--text-muted);
+}
+.panel-chevron{
+  font-size:10px;color:var(--text-muted);transition:transform .15s;
+}
+.panel.open .panel-chevron{transform:rotate(90deg)}
+.panel-body{
+  display:none;padding:10px 12px 14px;background:var(--bg);
+  border-top:1px solid var(--border);
+}
+.panel.open .panel-body{display:block}
+
+/* Panel form elements */
+.f{margin-bottom:10px}
+.f:last-child{margin-bottom:0}
+.f-label{
+  display:block;font-size:9px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px;
+  font-family:var(--font-mono);
+}
+.f-input{
+  width:100%;padding:5px 8px;font-size:11px;color:var(--text);
+  background:var(--bg-input);border:1px solid var(--border);border-radius:3px;
+  font-family:var(--font);outline:none;
+}
+.f-input:focus{border-color:var(--cyan)}
+.f-input.mono{font-family:var(--font-mono);font-size:10px}
+.f-select{
+  padding:5px 8px;font-size:11px;color:var(--text);
+  background:var(--bg-input);border:1px solid var(--border);border-radius:3px;
+  font-family:var(--font);outline:none;cursor:pointer;
+}
+.f-row{display:flex;align-items:center;gap:6px}
+.f-color{width:22px;height:22px;border-radius:3px;border:1px solid var(--border);cursor:pointer;position:relative;overflow:hidden}
+.f-color input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);cursor:pointer;opacity:0}
+.f-slider{flex:1;height:3px;-webkit-appearance:none;appearance:none;background:var(--border);border-radius:2px;outline:none}
+.f-slider::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:var(--cyan);cursor:pointer}
+.f-val{font-family:var(--font-mono);font-size:9px;color:var(--text-muted);min-width:24px;text-align:right}
+.f-btn{
+  padding:4px 8px;font-size:9px;font-weight:600;border:1px solid var(--border);
+  border-radius:3px;cursor:pointer;background:var(--bg-panel);color:var(--text-sec);
+  font-family:var(--font-mono);transition:all .12s;text-transform:uppercase;letter-spacing:.04em;
+}
+.f-btn:hover{border-color:var(--border-light);color:var(--text)}
+.f-btn.accent{border-color:var(--cyan);color:var(--cyan)}
+.f-btn.go{background:var(--cyan);color:#000;border-color:var(--cyan)}
+.f-toggle{
+  padding:3px 8px;font-size:9px;font-weight:600;border:1px solid var(--border);
+  border-radius:3px;cursor:pointer;font-family:var(--font-mono);transition:all .12s;
+}
+.f-toggle.on{background:var(--cyan-dim);border-color:rgba(6,182,212,.3);color:var(--cyan)}
+.f-toggle.off{background:transparent;color:var(--text-muted)}
+
+.f-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.f-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+.f-sep{height:1px;background:var(--border);margin:10px 0}
+
+/* DSP mini grid */
+.dsp-mini{display:grid;grid-template-columns:repeat(5,1fr);gap:3px}
+.dsp-chip{
+  padding:5px 2px;font-size:8px;text-align:center;border:1px solid var(--border);
+  border-radius:2px;cursor:pointer;font-family:var(--font-mono);color:var(--text-muted);
+  background:var(--bg-input);transition:all .12s;
+}
+.dsp-chip:hover{border-color:var(--border-light);color:var(--text-sec)}
+.dsp-chip.active{border-color:var(--cyan);color:var(--cyan);background:var(--cyan-dim)}
+
+/* Timeline mini */
+.tl-mini{display:flex;align-items:center;gap:0;margin:6px 0}
+.tl-b{
+  padding:5px 8px;font-size:8px;font-family:var(--font-mono);
+  border:1px solid var(--border);background:var(--bg-input);text-align:center;
+}
+.tl-b:first-child{border-radius:3px 0 0 3px}
+.tl-b:last-child{border-radius:0 3px 3px 0}
+.tl-b.main{background:var(--cyan-dim);border-color:rgba(6,182,212,.2);color:var(--cyan);flex:1}
+.tl-arr{padding:0 3px;color:var(--text-muted);font-size:8px}
+
+/* Event mini */
+.ev-row{
+  display:flex;align-items:center;gap:5px;padding:4px 6px;
+  background:var(--bg-input);border:1px solid var(--border);border-radius:3px;margin-bottom:2px;font-size:9px;
+}
+.ev-time{font-family:var(--font-mono);color:var(--cyan);min-width:36px}
+.ev-color{width:14px;height:14px;border-radius:2px;border:1px solid var(--border)}
+
+/* LRC textarea */
+.lrc{
+  width:100%;height:100px;padding:6px 8px;font-family:var(--font-mono);font-size:10px;line-height:1.7;
+  color:var(--text);background:var(--bg-input);border:1px solid var(--border);border-radius:3px;
+  resize:vertical;outline:none;
+}
+.lrc:focus{border-color:var(--cyan)}
+
+/* Color-coded panel accent borders */
+.panel[data-color="blue"] .panel-head{border-left:3px solid var(--blue)}
+.panel[data-color="purple"] .panel-head{border-left:3px solid var(--purple)}
+.panel[data-color="amber"] .panel-head{border-left:3px solid var(--amber)}
+.panel[data-color="green"] .panel-head{border-left:3px solid var(--green)}
+.panel[data-color="red"] .panel-head{border-left:3px solid var(--red)}
+.panel[data-color="cyan"] .panel-head{border-left:3px solid var(--cyan)}
+
+/* Upload zone */
+.upload{
+  border:1px dashed var(--border);border-radius:3px;padding:12px;text-align:center;
+  cursor:pointer;transition:all .12s;
+}
+.upload:hover{border-color:var(--cyan);background:var(--cyan-dim)}
+.upload span{font-size:9px;color:var(--text-muted);font-family:var(--font-mono)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-id">CMD.VIZ</span>
+      <div class="topbar-sep"></div>
+      <div class="topbar-track"><span>Midnight Frequencies</span> — Synthwave Collective</div>
+    </div>
+    <div class="topbar-right">
+      <button class="tb">Library</button>
+      <button class="tb">Load</button>
+      <button class="tb go">Export</button>
+    </div>
+  </div>
+
+  <!-- Main Grid -->
+  <div class="main">
+
+    <!-- LEFT: Canvas -->
+    <div class="canvas-section">
+      <div class="canvas-header">
+        <div class="canvas-header-left">
+          <span class="live">LIVE</span>
+          <span>16:9 &middot; 1920x1080</span>
+        </div>
+        <span style="color:var(--text-muted)">30 FPS &middot; PREVIEW</span>
+      </div>
+      <div class="canvas-viewport">
+        <div class="canvas-frame">
+          <div class="viz-bars" id="vizBars"></div>
+          <div class="canvas-frame-label">CANVAS OUTPUT</div>
+        </div>
+      </div>
+      <div class="playback-strip">
+        <button class="pb-btn" id="playBtn">&#9654;</button>
+        <input type="range" class="pb-seek" min="0" max="100" value="34">
+        <span class="pb-time">1:24 / 4:07</span>
+        <span class="pb-status">preview</span>
+      </div>
+    </div>
+
+    <!-- RIGHT: Panels -->
+    <div class="panels">
+
+      <!-- LYRICS (blue) -->
+      <div class="panel open" data-color="blue">
+        <div class="panel-head" onclick="togglePanel(this)">
+          <span class="panel-indicator blue"></span>
+          <span class="panel-name">Lyrics Editor</span>
+          <span class="panel-badge">8 lines</span>
+          <span class="panel-chevron">&#9656;</span>
+        </div>
+        <div class="panel-body">
+          <div class="f">
+            <label class="f-label">LRC</label>
+            <textarea class="lrc">[00:00.00] Midnight Frequencies
+[00:04.32] Riding through the neon glow
+[00:08.15] Frequencies that pulse and flow
+[00:12.48] Static on the radio
+[00:16.80] Signals from a world below
+[00:21.12] Midnight waves are calling me
+[00:25.44] Through the dark I'm floating free
+[00:29.76] Synthetic dreams in binary</textarea>
+          </div>
+          <div class="f-row">
+            <button class="f-btn accent">Rebuild</button>
+            <button class="f-btn">Apply</button>
+          </div>
+          <div class="f-sep"></div>
+          <div class="f">
+            <div class="f-row" style="margin-bottom:6px">
+              <span style="width:5px;height:5px;border-radius:50%;background:var(--green)"></span>
+              <span style="font-size:10px;color:var(--green);font-family:var(--font-mono)">67 words synced</span>
+              <button class="f-btn accent" style="margin-left:auto">Refine AI</button>
+            </div>
+            <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);padding:6px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px;line-height:1.6">
+              &#9888; 2 lines exceed 40 chars
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STYLE (purple) -->
+      <div class="panel" data-color="purple">
+        <div class="panel-head" onclick="togglePanel(this)">
+          <span class="panel-indicator purple"></span>
+          <span class="panel-name">Style &amp; Branding</span>
+          <span class="panel-badge">10 params</span>
+          <span class="panel-chevron">&#9656;</span>
+        </div>
+        <div class="panel-body">
+          <div class="f-grid">
+            <div>
+              <div class="f">
+                <label class="f-label">Template</label>
+                <select class="f-select" style="width:100%">
+                  <option>Classic Cover</option><option>Clean Frame</option><option>Corner Pulse</option><option>Cinematic</option>
+                </select>
+              </div>
+              <div class="f">
+                <label class="f-label">Font</label>
+                <select class="f-select" style="width:100%">
+                  <option>Montserrat</option><option>Inter</option><option>Lora</option><option>Courier Prime</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div class="f">
+                <label class="f-label">Active Color</label>
+                <div class="f-row">
+                  <div class="f-color" style="background:#a855f7"><input type="color" value="#a855f7"></div>
+                  <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted)">#a855f7</span>
+                </div>
+              </div>
+              <div class="f">
+                <label class="f-label">Inactive Color</label>
+                <div class="f-row">
+                  <div class="f-color" style="background:#555"><input type="color" value="#555555"></div>
+                  <span style="font-family:var(--font-mono);font-size:9px;color:var(--text-muted)">#555555</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="f-sep"></div>
+          <div class="f-grid-3">
+            <div class="f">
+              <label class="f-label">Opacity</label>
+              <div class="f-row"><input type="range" class="f-slider" min="5" max="100" value="40"><span class="f-val">.40</span></div>
+            </div>
+            <div class="f">
+              <label class="f-label">Smoothing</label>
+              <div class="f-row"><input type="range" class="f-slider" min="1" max="50" value="15"><span class="f-val">.15</span></div>
+            </div>
+            <div class="f">
+              <label class="f-label">V-Offset</label>
+              <div class="f-row"><input type="range" class="f-slider" min="-40" max="40" value="0"><span class="f-val">0</span></div>
+            </div>
+          </div>
+          <div class="f-sep"></div>
+          <div class="f-grid">
+            <div>
+              <label class="f-label">Logo Position</label>
+              <select class="f-select" style="width:100%"><option>Bottom Right</option><option>Bottom Left</option><option>Top Right</option><option>Top Left</option></select>
+            </div>
+            <div>
+              <label class="f-label">Logo Effect</label>
+              <select class="f-select" style="width:100%"><option>Off</option><option>Expanding Circle</option><option>Radial Bars</option><option>Circular Wave</option></select>
+            </div>
+          </div>
+          <div class="f" style="margin-top:6px">
+            <label class="f-label">Song Title</label>
+            <button class="f-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')">Visible</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MEDIA (blue) -->
+      <div class="panel" data-color="blue">
+        <div class="panel-head" onclick="togglePanel(this)">
+          <span class="panel-indicator blue"></span>
+          <span class="panel-name">Media &amp; Assets</span>
+          <span class="panel-badge">4 items</span>
+          <span class="panel-chevron">&#9656;</span>
+        </div>
+        <div class="panel-body">
+          <div class="f-grid">
+            <div>
+              <label class="f-label">Cover Art</label>
+              <div style="width:100%;aspect-ratio:1;background:linear-gradient(135deg,#151515,#1a1a1a);border:1px solid var(--border);border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:6px">
+                &#127925;
+              </div>
+              <div class="f-row">
+                <button class="f-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')">BG</button>
+                <button class="f-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')">Viz</button>
+              </div>
+            </div>
+            <div>
+              <div class="f">
+                <label class="f-label">Aspect Ratio</label>
+                <select class="f-select" style="width:100%">
+                  <option>16:9</option><option>9:16</option><option>1:1</option><option>4:3</option>
+                </select>
+              </div>
+              <div class="f">
+                <label class="f-label">Background</label>
+                <div class="upload"><span>Drop media</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="f-sep"></div>
+          <div class="f-grid">
+            <div>
+              <label class="f-label">Logo</label>
+              <div style="display:flex;align-items:center;gap:6px;padding:5px;background:var(--bg-input);border:1px solid var(--border);border-radius:3px">
+                <div style="width:22px;height:22px;background:var(--cyan-dim);border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:10px">&#9632;</div>
+                <span style="font-size:9px;font-family:var(--font-mono);color:var(--text-sec)">logo.png</span>
+              </div>
+            </div>
+            <div>
+              <label class="f-label">Audio</label>
+              <div class="upload" style="padding:8px"><span>Drop WAV</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TIMELINE (green) -->
+      <div class="panel" data-color="green">
+        <div class="panel-head" onclick="togglePanel(this)">
+          <span class="panel-indicator green"></span>
+          <span class="panel-name">Timeline</span>
+          <span class="panel-badge">3 stages</span>
+          <span class="panel-chevron">&#9656;</span>
+        </div>
+        <div class="panel-body">
+          <div class="tl-mini">
+            <div class="tl-b" style="color:var(--green);border-color:rgba(34,197,94,.2)">PRE<span style="font-size:7px;display:block;opacity:.6">3s</span></div>
+            <div class="tl-arr">&#9654;</div>
+            <div class="tl-b main">SONG<span style="font-size:7px;display:block;opacity:.6">4:07</span></div>
+            <div class="tl-arr">&#9654;</div>
+            <div class="tl-b" style="color:var(--amber);border-color:rgba(245,158,11,.2)">POST<span style="font-size:7px;display:block;opacity:.6">5s</span></div>
+          </div>
+          <div class="f-grid">
+            <div>
+              <div class="f"><label class="f-label">Pre-Roll</label><button class="f-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="margin-bottom:4px">Enabled</button></div>
+              <div class="f">
+                <select class="f-select" style="width:100%"><option>Text</option><option>QR Code</option></select>
+              </div>
+              <div class="f">
+                <div class="f-row"><input type="range" class="f-slider" min="1" max="15" value="3"><span class="f-val">3s</span></div>
+              </div>
+              <div class="f">
+                <textarea class="f-input mono" rows="2" style="resize:none;width:100%">Now playing: Midnight Frequencies</textarea>
+              </div>
+            </div>
+            <div>
+              <div class="f"><label class="f-label">Post-Roll</label><button class="f-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="margin-bottom:4px">Enabled</button></div>
+              <div class="f">
+                <select class="f-select" style="width:100%"><option>QR Code</option><option>Text</option></select>
+              </div>
+              <div class="f">
+                <div class="f-row"><input type="range" class="f-slider" min="1" max="15" value="5"><span class="f-val">5s</span></div>
+              </div>
+              <div class="f">
+                <textarea class="f-input mono" rows="2" style="resize:none;width:100%">https://suno.com/track/midnight-freq</textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DSP (red) -->
+      <div class="panel" data-color="red">
+        <div class="panel-head" onclick="togglePanel(this)">
+          <span class="panel-indicator red"></span>
+          <span class="panel-name">DSP Engine</span>
+          <span class="panel-badge">15 algos</span>
+          <span class="panel-chevron">&#9656;</span>
+        </div>
+        <div class="panel-body">
+          <div class="f-row" style="margin-bottom:8px">
+            <select class="f-select" style="flex:1">
+              <option>Retro LED</option><option>Broadcast VU</option><option>Neon Spectrogram</option>
+              <option>Club Radial</option><option>Organic Ambient</option><option>Social Hybrid</option>
+            </select>
+            <button class="f-btn">Rand</button>
+          </div>
+          <div class="dsp-mini">
+            <div class="dsp-chip active" onclick="pickDsp(this)">Bars</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Osc</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Circle</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Wave</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">St.Wav</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">St.Bar</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Log</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">LED</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Radial</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">W+Sp</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">VU</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Spect</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Part</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Organ</div>
+            <div class="dsp-chip" onclick="pickDsp(this)">Ring</div>
+          </div>
+          <div class="f-sep"></div>
+          <div class="f-grid">
+            <div>
+              <div class="f"><label class="f-label">Bars</label><select class="f-select" style="width:100%"><option>32</option><option>64</option><option>128</option></select></div>
+            </div>
+            <div>
+              <div class="f"><label class="f-label">Sensitivity</label><div class="f-row"><input type="range" class="f-slider" min="50" max="300" value="150"><span class="f-val">1.5x</span></div></div>
+            </div>
+          </div>
+          <div class="f-sep"></div>
+          <div class="f">
+            <label class="f-label">Color Events (2)</label>
+            <div class="ev-row">
+              <span class="ev-time">0:00</span>
+              <div class="ev-color" style="background:#06b6d4"></div>
+              <div class="ev-color" style="background:#555"></div>
+              <span style="margin-left:auto;cursor:pointer;color:var(--text-muted)">&times;</span>
+            </div>
+            <div class="ev-row">
+              <span class="ev-time">2:14</span>
+              <div class="ev-color" style="background:#a855f7"></div>
+              <div class="ev-color" style="background:#555"></div>
+              <span style="margin-left:auto;cursor:pointer;color:var(--text-muted)">&times;</span>
+            </div>
+            <button class="f-btn accent" style="width:100%;margin-top:4px">+ Add at 1:24</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- EXPORT (amber) -->
+      <div class="panel" data-color="amber">
+        <div class="panel-head" onclick="togglePanel(this)">
+          <span class="panel-indicator amber"></span>
+          <span class="panel-name">Export &amp; Publish</span>
+          <span class="panel-badge">webm</span>
+          <span class="panel-chevron">&#9656;</span>
+        </div>
+        <div class="panel-body">
+          <div class="f-grid">
+            <div>
+              <div class="f"><label class="f-label">Target</label><select class="f-select" style="width:100%"><option>16:9 HD</option><option>9:16</option></select></div>
+              <div class="f"><label class="f-label">FPS</label><select class="f-select" style="width:100%"><option>30</option><option>60</option></select></div>
+            </div>
+            <div>
+              <div class="f"><label class="f-label">Bitrate</label><input class="f-input mono" type="number" value="5000000" step="100000"></div>
+              <div class="f"><label class="f-label">Mode</label><select class="f-select" style="width:100%"><option>VBR</option><option>CBR</option></select></div>
+            </div>
+          </div>
+          <div class="f-sep"></div>
+          <div class="f-grid">
+            <div>
+              <div class="f"><label class="f-label">Platform</label><select class="f-select" style="width:100%"><option>YouTube</option><option>Facebook</option><option>Both</option></select></div>
+            </div>
+            <div>
+              <div class="f"><label class="f-label">Title</label><input class="f-input" value="Midnight Frequencies" style="width:100%"></div>
+            </div>
+          </div>
+          <div class="f" style="margin-top:8px">
+            <button class="f-btn go" style="width:100%;padding:8px;font-size:10px">Export Video Locally</button>
+            <div style="text-align:center;margin-top:4px;font-size:9px;color:var(--text-muted);font-family:var(--font-mono)">
+              Renders locally &middot; Downloads .webm
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+function togglePanel(head) {
+  const panel = head.closest('.panel');
+  panel.classList.toggle('open');
+}
+
+function pickDsp(el) {
+  document.querySelectorAll('.dsp-chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+const playBtn = document.getElementById('playBtn');
+playBtn.addEventListener('click', () => {
+  playBtn.innerHTML = playBtn.innerHTML.trim() === '&#9654;' ? '&#10074;&#10074;' : '&#9654;';
+});
+
+const bars = document.getElementById('vizBars');
+for (let i = 0; i < 36; i++) {
+  const bar = document.createElement('div');
+  bar.className = 'viz-bar';
+  const a = Math.random() * 15 + 4;
+  const b = Math.random() * 40 + 10;
+  const d = (Math.random() * 0.7 + 0.3).toFixed(2);
+  bar.style.setProperty('--a', a + 'px');
+  bar.style.setProperty('--b', b + 'px');
+  bar.style.setProperty('--d', d + 's');
+  bar.style.animationDelay = (Math.random() * 0.4).toFixed(2) + 's';
+  bars.appendChild(bar);
+}
+</script>
+</body>
+</html>

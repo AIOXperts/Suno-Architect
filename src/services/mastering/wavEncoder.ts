@@ -55,12 +55,19 @@ export async function encodeWavAsync(
     for (let s = i; s < end; s++) {
       for (let ch = 0; ch < numChannels; ch++) {
         const sample = Math.max(-1, Math.min(1, channels[ch][s]));
-        const intSample = Math.round(sample * maxVal);
 
         if (safeBitDepth === 16) {
+          // TPDF dither (triangular probability density) = two independent
+          // RPDF sources, added at ±1 LSB before quantization. This decorrelates
+          // quantization error from the signal, replacing truncation distortion
+          // with a constant low-level noise floor (avoids audible harmonic
+          // distortion on 16-bit exports).
+          const dithered = sample * maxVal + (Math.random() + Math.random() - 1);
+          const intSample = Math.max(-32768, Math.min(32767, Math.round(dithered)));
           view.setInt16(offset, intSample, true);
           offset += 2;
         } else {
+          const intSample = Math.round(sample * maxVal);
           const clamped = Math.max(-8388607, Math.min(8388607, intSample));
           view.setUint8(offset, clamped & 0xff);
           view.setUint8(offset + 1, (clamped >> 8) & 0xff);

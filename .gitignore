@@ -49,3 +49,5 @@ suno-architect*
 private/
 test-results/
 playwright-report/
+.suno-session/
+output/

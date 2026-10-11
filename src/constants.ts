@@ -36,11 +36,22 @@ export const APP_LAYOUTS: { id: AppLayout; label: string; icon: React.ReactNode 
   },
 ];
 
+/**
+ * Suno base model ids (`mv` field on /api/generate/v2-web/).
+ * v6 family ids verified against Suno's own web bundle + live clip payloads
+ * (major_model_version === "v6"); see docs/SunoApiV6.md.
+ */
 export const SUNO_MODEL_MAPPINGS = [
+  { label: "V6", value: "chirp-hawk" },
+  { label: "V6 Wild", value: "chirp-hawk-wild" },
+  { label: "V6 Mini", value: "chirp-goose" },
   { label: "V5.5", value: "chirp-fenix" },
+  { label: "V5.5 Remaster", value: "chirp-flounder" },
   { label: "V5", value: "chirp-crow" },
+  { label: "V5 Remaster", value: "chirp-carp" },
   { label: "V4.5+", value: "chirp-bluejay" },
   { label: "V4.5", value: "chirp-auk" },
+  { label: "V4.5 Turbo", value: "chirp-auk-turbo" },
   { label: "V4", value: "chirp-v4" },
   { label: "V3.5", value: "chirp-v3-5" },
   { label: "V3", value: "chirp-v3-0" },

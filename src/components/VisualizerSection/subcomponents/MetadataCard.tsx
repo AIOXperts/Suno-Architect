@@ -50,7 +50,7 @@ const MetadataCard: React.FC<MetadataCardProps> = ({
   return (
     <AppCard className="rounded-xl overflow-hidden shadow-lg p-0">
       <div className="bg-[var(--app-panel)] px-4 py-3 border-b border-[var(--app-panel-border)] flex justify-between items-center">
-          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Timed Lyrics Editor (LRC)</h3>
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Timed Lyrics Editor (LRC / JSON)</h3>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-slate-500">{lrcParsedLineCount} timestamps</span>
             <AppButton
@@ -66,10 +66,10 @@ const MetadataCard: React.FC<MetadataCardProps> = ({
               size="xs"
               variant={lrcApplyStatus === 'error' ? 'danger' : 'primary'}
               onClick={onApplyLrc}
-              disabled={!hasAlignment}
-              title="Apply LRC timestamps + text to visualizer lines"
+              disabled={!hasAlignment && !lrcDraft.trim()}
+              title="Apply LRC or import timed JSON into visualizer lines"
             >
-              {lrcApplyStatus === 'applied' ? 'Applied!' : lrcApplyStatus === 'error' ? 'LRC Error' : 'Apply LRC'}
+              {lrcApplyStatus === 'applied' ? 'Applied!' : lrcApplyStatus === 'error' ? 'Import Error' : 'Apply LRC / JSON'}
             </AppButton>
           </div>
       </div>
@@ -78,10 +78,10 @@ const MetadataCard: React.FC<MetadataCardProps> = ({
               value={lrcDraft}
               onChange={(e) => setLrcDraft(e.target.value)}
               className="w-full h-44 bg-slate-950 text-xs font-mono text-slate-300 placeholder-slate-600 custom-scrollbar resize-y leading-relaxed"
-              placeholder="[00:12.34] First lyric line"
+              placeholder={"[00:12.34] First lyric line\nor paste WhisperX JSON here"}
             />
             <p className="text-[10px] text-slate-500 mt-2 px-1">
-              Single editor flow: edit timestamp + lyric text here, then click <strong>Apply LRC</strong>. Suno alignment is still used underneath for timing windows.
+              Single editor flow: edit timestamp + lyric text here, or paste timed JSON from WhisperX, then click <strong>Apply LRC / JSON</strong>. Imported JSON replaces the active word alignment and rebuilds the LRC draft automatically.
             </p>
 
             {(topLongLineIssues.length > 0 || topLrcGapIssues.length > 0 || lrcInvalidLineNumbers.length > 0) && (

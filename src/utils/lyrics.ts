@@ -409,6 +409,175 @@ export const parseLrc = (lrcContent: string): LrcParseResult => {
     return { entries, invalidLineNumbers };
 };
 
+const isRecord = (value: unknown): value is Record<string, any> => (
+    typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+const toFiniteNumber = (value: unknown): number | null => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+    if (typeof value === 'string' && value.trim()) {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+};
+
+const readWordText = (value: unknown): string => {
+    if (!isRecord(value)) return '';
+    const raw = value.word ?? value.text ?? value.token ?? value.value ?? value.label;
+    return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+};
+
+type LooseAlignedWord = {
+    word: string;
+    start_s: number | null;
+    end_s: number | null;
+    success: boolean;
+    p_align: number;
+};
+
+const normalizeWordTimings = (
+    words: LooseAlignedWord[],
+    fallbackStart?: number | null,
+    fallbackEnd?: number | null
+): AlignedWord[] => {
+    if (words.length === 0) return [];
+
+    const knownStarts = words.map((word) => word.start_s).filter((value): value is number => value !== null);
+    const knownEnds = words.map((word) => word.end_s).filter((value): value is number => value !== null);
+    const defaultStart = fallbackStart ?? knownStarts[0] ?? 0;
+    const inferredEnd = fallbackEnd ?? knownEnds[knownEnds.length - 1] ?? (defaultStart + Math.max(0.2, words.length * 0.2));
+    const safeEnd = Math.max(defaultStart + 0.05, inferredEnd);
+
+    return words.map((word, index) => {
+        const prev = index > 0 ? words[index - 1] : null;
+        const next = index < words.length - 1 ? words[index + 1] : null;
+        const nextKnownStart = words.slice(index + 1).find((item) => item.start_s !== null)?.start_s ?? null;
+
+        const start_s = Math.max(
+            0,
+            word.start_s
+                ?? prev?.end_s
+                ?? prev?.start_s
+                ?? fallbackStart
+                ?? defaultStart
+        );
+        const endSeed =
+            word.end_s
+            ?? next?.start_s
+            ?? nextKnownStart
+            ?? fallbackEnd
+            ?? safeEnd;
+        const end_s = Math.max(start_s + 0.02, endSeed ?? (start_s + 0.2));
+
+        return {
+            word: word.word,
+            start_s,
+            end_s,
+            success: word.success,
+            p_align: word.p_align
+        };
+    });
+};
+
+const normalizeWordArray = (
+    rawWords: unknown[],
+    fallbackStart?: number | null,
+    fallbackEnd?: number | null
+): AlignedWord[] => {
+    const looseWords: LooseAlignedWord[] = rawWords
+        .map((item) => {
+            const word = readWordText(item);
+            if (!word) return null;
+            const record = isRecord(item) ? item : {};
+            return {
+                word,
+                start_s: toFiniteNumber(record.start_s ?? record.start ?? record.startTime ?? record.begin),
+                end_s: toFiniteNumber(record.end_s ?? record.end ?? record.endTime ?? record.stop),
+                success: record.success !== false,
+                p_align: toFiniteNumber(record.p_align ?? record.score ?? record.confidence ?? record.probability) ?? 1
+            } satisfies LooseAlignedWord;
+        })
+        .filter((item): item is LooseAlignedWord => item !== null);
+
+    return normalizeWordTimings(looseWords, fallbackStart, fallbackEnd);
+};
+
+type ImportedTimedLyrics = {
+    alignment: AlignedWord[];
+    lines: AlignedWord[][];
+    lrcContent: string;
+    lyricSource: string;
+};
+
+export const looksLikeTimedLyricsJson = (content: string): boolean => {
+    const trimmed = content.trim();
+    if (!trimmed) return false;
+    if (trimmed.startsWith('{')) return true;
+    return /^\[\s*[\{\[]/.test(trimmed);
+};
+
+export const parseTimedLyricsJson = (jsonContent: string): ImportedTimedLyrics => {
+    const raw = JSON.parse(jsonContent) as unknown;
+    const root = isRecord(raw) ? raw : null;
+    const arrayRoot = Array.isArray(raw) ? raw : null;
+    const segmentsSource = root?.segments
+        ?? (
+            arrayRoot?.some((item) => isRecord(item) && (Array.isArray(item.words) || Array.isArray(item.word_segments)))
+                ? arrayRoot
+                : null
+        );
+    const alignedWordsSource = root?.aligned_words ?? root?.word_segments ?? root?.words;
+
+    const linesFromSegments: AlignedWord[][] = Array.isArray(segmentsSource)
+        ? segmentsSource
+            .flatMap((segment) => {
+                if (!isRecord(segment)) return [];
+                const segmentStart = toFiniteNumber(segment.start_s ?? segment.start ?? segment.startTime ?? segment.begin);
+                const segmentEnd = toFiniteNumber(segment.end_s ?? segment.end ?? segment.endTime ?? segment.stop);
+                const nestedWords = Array.isArray(segment.words)
+                    ? segment.words
+                    : Array.isArray(segment.word_segments)
+                        ? segment.word_segments
+                        : [];
+
+                if (nestedWords.length > 0) {
+                    const segmentWords = normalizeWordArray(nestedWords, segmentStart, segmentEnd);
+                    return groupWordsByTiming(segmentWords);
+                }
+
+                const segmentText = readWordText(segment);
+                if (!segmentText) return [];
+
+                const syntheticWords = segmentText.split(/\s+/).filter(Boolean).map((word) => ({ word }));
+                return [normalizeWordArray(syntheticWords, segmentStart, segmentEnd)];
+            })
+            .filter((line) => line.length > 0)
+        : [];
+
+    const alignment = linesFromSegments.length > 0
+        ? linesFromSegments.flat()
+        : Array.isArray(alignedWordsSource)
+            ? normalizeWordArray(alignedWordsSource)
+            : Array.isArray(arrayRoot)
+                ? normalizeWordArray(arrayRoot)
+                : [];
+
+    if (alignment.length === 0) {
+        throw new Error('JSON did not contain any timed words.');
+    }
+
+    const lines = linesFromSegments.length > 0 ? linesFromSegments : groupWordsByTiming(alignment);
+    const lyricSource = lines.map((line) => line.map((word) => word.word).join(' ').trim()).filter(Boolean).join('\n');
+
+    return {
+        alignment,
+        lines,
+        lrcContent: generateLrc(lines),
+        lyricSource
+    };
+};
+
 export const groupWordsByLrc = (aligned: AlignedWord[], lrcContent: string): AlignedWord[][] => {
     const cleanAligned = getCleanAlignedWords(aligned);
     const { entries } = parseLrc(lrcContent);
@@ -464,6 +633,20 @@ export const groupWordsByLrcWithText = (aligned: AlignedWord[], lrcContent: stri
         const tokens = entry.text.split(/\s+/).map(t => t.trim()).filter(Boolean);
         if (tokens.length === 0) {
             if (base.length > 0) result.push(base);
+            continue;
+        }
+
+        const baseTokens = base.map((word) => word.word.trim()).filter(Boolean);
+        const sameTokenCount = baseTokens.length === tokens.length;
+        const sameNormalizedTokens = sameTokenCount && baseTokens.every((token, idx) => (
+            cleanStringForMatch(token) === cleanStringForMatch(tokens[idx])
+        ));
+
+        if (sameNormalizedTokens) {
+            result.push(base.map((word, idx) => ({
+                ...word,
+                word: tokens[idx]
+            })));
             continue;
         }
 

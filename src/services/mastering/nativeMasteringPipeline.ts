@@ -26,6 +26,7 @@ export interface NativePreviewRenderResult {
   originalBuffer: AudioBuffer;
   previewBuffer: AudioBuffer;
   measuredLufs?: number;
+  measuredTruePeak?: number;
   decodedBuffer?: AudioBuffer;
 }
 
@@ -88,6 +89,24 @@ function cloneAudioBuffer(source: AudioBuffer): AudioBuffer {
   return createAudioBuffer(channels, source.sampleRate);
 }
 
+/**
+ * Resample an AudioBuffer to `targetRate` using the browser's high-quality
+ * OfflineAudioContext resampler. Returns the same buffer if rates already match.
+ * This makes the "Sample Rate" output setting (44.1 kHz vs 48 kHz) actually
+ * take effect — previously it was ignored and the WAV was always written at
+ * the source's native rate.
+ */
+async function resampleAudioBuffer(buffer: AudioBuffer, targetRate: number): Promise<AudioBuffer> {
+  if (buffer.sampleRate === targetRate) return buffer;
+  const targetLength = Math.max(1, Math.ceil(buffer.duration * targetRate));
+  const ctx = new OfflineAudioContext(buffer.numberOfChannels, targetLength, targetRate);
+  const src = ctx.createBufferSource();
+  src.buffer = buffer;
+  src.connect(ctx.destination);
+  src.start();
+  return await ctx.startRendering();
+}
+
 export async function renderNativeMasteredWavFromBlob(
   inputBlob: Blob,
   sourceFileName: string,
@@ -96,14 +115,16 @@ export async function renderNativeMasteredWavFromBlob(
 ): Promise<NativeMasteringResult> {
   onProgress?.({ phase: 'decode', progress: 0.1, message: 'Decoding source...' });
   const decoded = await decodeAudioBlobToBuffer(inputBlob);
-  const processingInput = cloneAudioBuffer(decoded);
+  const targetRate = settings.sampleRate || decoded.sampleRate;
+  const resampled = await resampleAudioBuffer(decoded, targetRate);
+  const processingInput = cloneAudioBuffer(resampled);
   
   onProgress?.({ phase: 'render', progress: 0.3, message: 'Processing DSP chain...' });
   const result = await runMasteringWorker(processingInput, settings);
   
   onProgress?.({ phase: 'encode', progress: 0.8, message: 'Encoding WAV...' });
-  const masteredBuffer = createAudioBuffer(result.channels, decoded.sampleRate);
-  const wavBlob = await encodeWavAsync(masteredBuffer, decoded.sampleRate, (settings.bitDepth || 24) as 16 | 24);
+  const masteredBuffer = createAudioBuffer(result.channels, resampled.sampleRate);
+  const wavBlob = await encodeWavAsync(masteredBuffer, resampled.sampleRate, (settings.bitDepth || 24) as 16 | 24);
   
   onProgress?.({ phase: 'encode', progress: 1.0, message: 'Done' });
   const fileName = sourceFileName.replace(/\.[^/.]+$/, "") + " (Mastered).wav";
@@ -129,16 +150,19 @@ export async function renderNativePreviewBufferFromBlob(
     decoded = await decodeAudioBlobToBuffer(inputBlob);
   }
   const originalBuffer = cloneAudioBuffer(decoded);
-  const processingInput = cloneAudioBuffer(decoded);
+  const targetRate = settings.sampleRate || decoded.sampleRate;
+  const resampled = await resampleAudioBuffer(decoded, targetRate);
+  const processingInput = cloneAudioBuffer(resampled);
   
   onProgress?.({ phase: 'render', progress: 0.5, message: 'Rendering preview DSP...' });
   const result = await runMasteringWorker(processingInput, settings);
-  const previewBuffer = createAudioBuffer(result.channels, originalBuffer.sampleRate);
+  const previewBuffer = createAudioBuffer(result.channels, resampled.sampleRate);
   
   return { 
     originalBuffer, 
     previewBuffer,
     measuredLufs: result.measuredLufs,
+    measuredTruePeak: result.measuredTruePeak,
     decodedBuffer: decoded,
   };
 }
@@ -146,6 +170,7 @@ export async function renderNativePreviewBufferFromBlob(
 interface WorkerResult {
   channels: Float32Array[];
   measuredLufs?: number;
+  measuredTruePeak?: number;
 }
 
 async function runMasteringWorker(buffer: AudioBuffer, settings: MasteringSettings): Promise<WorkerResult> {

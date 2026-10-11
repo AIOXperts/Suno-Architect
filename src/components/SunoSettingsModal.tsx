@@ -29,7 +29,7 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
   
   // Connection State
   const [cookie, setCookie] = useState('');
-  const [model, setModel] = useState('chirp-bluejay');
+  const [model, setModel] = useState('chirp-hawk');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyStatus, setVerifyStatus] = useState<{success: boolean, msg: string} | null>(null);
   const [localCredits, setLocalCredits] = useState<number | null>(null);
@@ -57,7 +57,7 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
         setCookie(initialCookie);
-        setModel(initialModel || 'chirp-bluejay');
+        setModel(initialModel || 'chirp-hawk');
         setLocalCredits(currentCredits);
         setPromptSettings(initialPromptSettings);
         

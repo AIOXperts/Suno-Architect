@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept B — Zen Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#13111a;
+  --bg-elevated:#1a1725;
+  --bg-panel:#201d2b;
+  --bg-input:#16131f;
+  --bg-hover:#28243a;
+  --border:#2a2640;
+  --border-subtle:#221f33;
+  --text:#d8d3e8;
+  --text-sec:#918ba5;
+  --text-muted:#5c5677;
+  --accent:#a78bfa;
+  --accent-soft:rgba(167,139,250,.12);
+  --accent-glow:rgba(167,139,250,.25);
+  --green:#6ee7b7;
+  --amber:#fbbf24;
+  --red:#f87171;
+  --cyan:#67e8f9;
+  --font:'IBM Plex Sans',sans-serif;
+  --font-head:'Sora',sans-serif;
+  --font-mono:'IBM Plex Mono',monospace;
+  --r:12px;
+  --r-sm:8px;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.5}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+
+.app{display:flex;flex-direction:column;height:100vh}
+
+/* ─── Header ─── */
+.header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 28px;height:52px;min-height:52px;
+  background:var(--bg);border-bottom:1px solid var(--border-subtle);
+}
+.header-left{display:flex;align-items:center;gap:16px}
+.header-brand{font-family:var(--font-head);font-size:15px;font-weight:600;color:var(--accent);letter-spacing:-.02em}
+.header-song{font-size:13px;color:var(--text-sec);font-weight:400}
+.header-song span{color:var(--text)}
+.header-actions{display:flex;gap:6px}
+.hdr-btn{
+  padding:7px 14px;font-size:12px;font-weight:500;border:none;border-radius:20px;
+  cursor:pointer;font-family:var(--font);transition:all .2s;
+}
+.hdr-btn.ghost{background:transparent;color:var(--text-sec)}
+.hdr-btn.ghost:hover{color:var(--text);background:var(--bg-hover)}
+.hdr-btn.outline{background:transparent;color:var(--text-sec);border:1px solid var(--border)}
+.hdr-btn.outline:hover{border-color:var(--accent);color:var(--accent)}
+.hdr-btn.filled{background:var(--accent);color:#1a1725;font-weight:600}
+.hdr-btn.filled:hover{box-shadow:0 0 24px var(--accent-glow);transform:translateY(-1px)}
+
+/* ─── Stage ─── */
+.stage{flex:1;display:flex;min-height:0;position:relative}
+
+/* Canvas Center */
+.canvas-center{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:24px;position:relative;transition:margin-right .4s cubic-bezier(.4,0,.2,1);
+  background:radial-gradient(ellipse at 50% 40%,rgba(167,139,250,.04) 0%,transparent 60%);
+}
+.canvas-center.drawer-open{margin-right:380px}
+
+.canvas-frame{
+  position:relative;
+  width:min(68vw,920px);max-width:100%;aspect-ratio:16/9;
+  border-radius:var(--r);overflow:hidden;
+  box-shadow:
+    0 0 0 1px var(--border-subtle),
+    0 24px 80px rgba(0,0,0,.4),
+    0 0 120px rgba(167,139,250,.06);
+}
+.canvas-inner{
+  width:100%;height:100%;
+  background:linear-gradient(160deg,#1a1725 0%,#13111a 50%,#1a1725 100%);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+}
+.canvas-wave{
+  display:flex;align-items:center;gap:3px;height:48px;
+}
+.canvas-wave-bar{
+  width:2px;border-radius:2px;background:var(--accent);
+  animation:wave var(--d) ease-in-out infinite alternate;
+  opacity:.5;
+}
+@keyframes wave{from{height:var(--a)}to{height:var(--b)}}
+.canvas-fps{margin-top:20px;font-family:var(--font-mono);font-size:10px;color:var(--text-muted);letter-spacing:.12em;text-transform:uppercase}
+.canvas-overlay-tl{
+  position:absolute;top:16px;left:16px;display:flex;align-items:center;gap:8px;
+}
+.canvas-live{
+  padding:3px 10px;border-radius:12px;font-size:10px;font-weight:500;
+  font-family:var(--font-mono);letter-spacing:.06em;
+  background:rgba(110,231,183,.1);color:var(--green);
+  border:1px solid rgba(110,231,183,.2);
+}
+.canvas-live::before{
+  content:'';display:inline-block;width:5px;height:5px;border-radius:50%;
+  background:var(--green);margin-right:6px;animation:blink 2s infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.canvas-ratio{font-family:var(--font-mono);font-size:10px;color:var(--text-muted)}
+
+/* Playback */
+.playback{
+  width:min(68vw,920px);max-width:100%;margin-top:16px;
+  display:flex;align-items:center;gap:14px;
+}
+.playback-seek{
+  flex:1;height:3px;-webkit-appearance:none;appearance:none;
+  background:var(--border);border-radius:2px;outline:none;cursor:pointer;
+}
+.playback-seek::-webkit-slider-thumb{
+  -webkit-appearance:none;width:10px;height:10px;border-radius:50%;
+  background:var(--accent);cursor:pointer;box-shadow:0 0 8px var(--accent-glow);
+  transition:transform .15s;
+}
+.playback-seek::-webkit-slider-thumb:hover{transform:scale(1.4)}
+.play-btn{
+  width:36px;height:36px;border-radius:50%;border:none;
+  background:var(--accent-soft);color:var(--accent);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;transition:all .2s;
+}
+.play-btn:hover{background:var(--accent-glow);transform:scale(1.05)}
+.playback-time{font-family:var(--font-mono);font-size:11px;color:var(--text-muted)}
+
+/* ─── Toolbar ─── */
+.toolbar{
+  position:absolute;right:20px;top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;gap:4px;z-index:20;
+}
+.tool-btn{
+  width:44px;height:44px;border-radius:var(--r);border:1px solid var(--border-subtle);
+  background:var(--bg-elevated);color:var(--text-muted);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:all .2s;font-size:16px;
+  backdrop-filter:blur(8px);
+}
+.tool-btn:hover{background:var(--bg-hover);color:var(--text-sec);border-color:var(--border)}
+.tool-btn.active{background:var(--accent-soft);color:var(--accent);border-color:rgba(167,139,250,.3)}
+.tool-label{
+  position:absolute;right:52px;padding:4px 10px;background:var(--bg-panel);
+  border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-sec);
+  white-space:nowrap;pointer-events:none;opacity:0;transform:translateX(4px);
+  transition:all .15s;
+}
+.tool-btn:hover .tool-label{opacity:1;transform:translateX(0)}
+
+/* ─── Drawer ─── */
+.drawer{
+  position:absolute;right:0;top:0;bottom:0;width:380px;
+  background:var(--bg-elevated);border-left:1px solid var(--border-subtle);
+  transform:translateX(100%);transition:transform .4s cubic-bezier(.4,0,.2,1);
+  display:flex;flex-direction:column;z-index:15;
+}
+.drawer.open{transform:translateX(0)}
+.drawer-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;border-bottom:1px solid var(--border-subtle);
+}
+.drawer-title{font-family:var(--font-head);font-size:14px;font-weight:600;letter-spacing:-.01em}
+.drawer-close{
+  width:28px;height:28px;border-radius:6px;border:none;background:transparent;
+  color:var(--text-muted);cursor:pointer;font-size:16px;display:flex;align-items:center;
+  justify-content:center;transition:all .15s;
+}
+.drawer-close:hover{background:var(--bg-hover);color:var(--text-sec)}
+.drawer-body{flex:1;overflow-y:auto;padding:20px}
+
+/* Drawer content */
+.d-section{margin-bottom:24px}
+.d-section:last-child{margin-bottom:0}
+.d-section-title{
+  font-size:10px;font-weight:600;color:var(--text-muted);text-transform:uppercase;
+  letter-spacing:.1em;margin-bottom:12px;font-family:var(--font-mono);
+}
+.d-field{margin-bottom:12px}
+.d-field:last-child{margin-bottom:0}
+.d-label{
+  display:block;font-size:11px;color:var(--text-sec);margin-bottom:5px;
+  font-weight:500;
+}
+.d-input{
+  width:100%;padding:7px 11px;font-size:12px;color:var(--text);
+  background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r-sm);
+  font-family:var(--font);outline:none;transition:border-color .2s;
+}
+.d-input:focus{border-color:var(--accent)}
+.d-input.mono{font-family:var(--font-mono);font-size:11px}
+.d-select{
+  width:100%;padding:7px 11px;font-size:12px;color:var(--text);
+  background:var(--bg-input);border:1px solid var(--border);border-radius:var(--r-sm);
+  font-family:var(--font);outline:none;cursor:pointer;
+}
+.d-row{display:flex;align-items:center;gap:8px}
+.d-color{
+  width:28px;height:28px;border-radius:var(--r-sm);border:2px solid var(--border);
+  cursor:pointer;position:relative;overflow:hidden;
+}
+.d-color input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);cursor:pointer;opacity:0}
+.d-slider{
+  flex:1;height:3px;-webkit-appearance:none;appearance:none;
+  background:var(--border);border-radius:2px;outline:none;
+}
+.d-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:var(--accent);cursor:pointer;
+}
+.d-val{font-family:var(--font-mono);font-size:10px;color:var(--text-muted);min-width:28px;text-align:right}
+.d-toggle{
+  padding:5px 12px;font-size:11px;font-weight:500;border:1px solid var(--border);
+  border-radius:16px;cursor:pointer;transition:all .2s;font-family:var(--font);
+}
+.d-toggle.on{background:var(--accent-soft);border-color:rgba(167,139,250,.3);color:var(--accent)}
+.d-toggle.off{background:transparent;color:var(--text-muted)}
+.d-toggle:hover{border-color:var(--accent)}
+
+.d-btn{
+  padding:8px 16px;font-size:12px;font-weight:500;border:1px solid var(--border);
+  border-radius:var(--r-sm);cursor:pointer;background:var(--bg-panel);
+  color:var(--text-sec);font-family:var(--font);transition:all .2s;
+}
+.d-btn:hover{border-color:var(--accent);color:var(--accent)}
+.d-btn.primary{background:var(--accent);color:#1a1725;border-color:var(--accent);font-weight:600}
+.d-btn.primary:hover{box-shadow:0 0 16px var(--accent-glow)}
+
+.d-card{
+  background:var(--bg-panel);border:1px solid var(--border-subtle);
+  border-radius:var(--r-sm);padding:12px;
+}
+.d-sep{height:1px;background:var(--border-subtle);margin:16px 0}
+
+textarea.d-lrc{
+  width:100%;height:130px;padding:10px;font-family:var(--font-mono);font-size:11px;
+  line-height:1.8;color:var(--text);background:var(--bg-input);
+  border:1px solid var(--border);border-radius:var(--r-sm);resize:vertical;outline:none;
+}
+textarea.d-lrc:focus{border-color:var(--accent)}
+
+/* DSP grid in drawer */
+.dsp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.dsp-chip{
+  padding:7px 4px;font-size:9px;text-align:center;border:1px solid var(--border-subtle);
+  border-radius:6px;cursor:pointer;font-family:var(--font-mono);color:var(--text-muted);
+  background:var(--bg-panel);transition:all .15s;
+}
+.dsp-chip:hover{border-color:var(--border);color:var(--text-sec)}
+.dsp-chip.active{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+
+/* Timeline flow */
+.tl-flow{display:flex;align-items:center;gap:0;margin:10px 0}
+.tl-block{
+  padding:8px 10px;font-size:10px;font-family:var(--font-mono);
+  border:1px solid var(--border-subtle);background:var(--bg-panel);text-align:center;
+}
+.tl-block:first-child{border-radius:6px 0 0 6px}
+.tl-block:last-child{border-radius:0 6px 6px 0}
+.tl-block.main{background:var(--accent-soft);border-color:rgba(167,139,250,.2);color:var(--accent);flex:1}
+.tl-arrow{padding:0 4px;color:var(--text-muted);font-size:9px}
+
+/* Upload zone */
+.upload-zone{
+  border:1.5px dashed var(--border);border-radius:var(--r-sm);
+  padding:16px;text-align:center;cursor:pointer;transition:all .2s;
+}
+.upload-zone:hover{border-color:var(--accent);background:var(--accent-soft)}
+.upload-zone p{font-size:11px;color:var(--text-muted)}
+
+.event-row{
+  display:flex;align-items:center;gap:6px;padding:6px 8px;
+  background:var(--bg-panel);border:1px solid var(--border-subtle);
+  border-radius:6px;margin-bottom:3px;font-size:10px;
+}
+.event-time{font-family:var(--font-mono);color:var(--accent);min-width:40px}
+.event-color{width:16px;height:16px;border-radius:3px;border:1px solid var(--border)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <span class="header-brand">Zen Studio</span>
+      <span class="header-song"><span>Midnight Frequencies</span> — Synthwave Collective</span>
+    </div>
+    <div class="header-actions">
+      <button class="hdr-btn ghost">Library</button>
+      <button class="hdr-btn outline">Load Clip</button>
+      <button class="hdr-btn filled">Export Video</button>
+    </div>
+  </div>
+
+  <!-- Stage -->
+  <div class="stage">
+    <div class="canvas-center" id="canvasCenter">
+
+      <!-- Canvas -->
+      <div class="canvas-frame">
+        <div class="canvas-inner">
+          <div class="canvas-wave" id="waveBars"></div>
+          <div class="canvas-fps">16:9 FHD &middot; 30fps</div>
+        </div>
+        <div class="canvas-overlay-tl">
+          <span class="canvas-live">LIVE</span>
+          <span class="canvas-ratio">1920&times;1080</span>
+        </div>
+      </div>
+
+      <!-- Playback -->
+      <div class="playback">
+        <button class="play-btn" id="playBtn">&#9654;</button>
+        <input type="range" class="playback-seek" min="0" max="100" value="34">
+        <span class="playback-time">1:24 / 4:07</span>
+      </div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <button class="tool-btn" data-drawer="lyrics" style="position:relative">
+        <span class="tool-label">Lyrics</span>&#9835;
+      </button>
+      <button class="tool-btn" data-drawer="style" style="position:relative">
+        <span class="tool-label">Style</span>&#9670;
+      </button>
+      <button class="tool-btn" data-drawer="media" style="position:relative">
+        <span class="tool-label">Media</span>&#9635;
+      </button>
+      <button class="tool-btn" data-drawer="timeline" style="position:relative">
+        <span class="tool-label">Timeline</span>&#9654;
+      </button>
+      <button class="tool-btn" data-drawer="dsp" style="position:relative">
+        <span class="tool-label">DSP</span>&#8968;
+      </button>
+      <button class="tool-btn" data-drawer="export" style="position:relative">
+        <span class="tool-label">Export</span>&#10515;
+      </button>
+    </div>
+
+    <!-- Drawer -->
+    <div class="drawer" id="drawer">
+      <div class="drawer-header">
+        <span class="drawer-title" id="drawerTitle">Lyrics</span>
+        <button class="drawer-close" id="drawerClose">&times;</button>
+      </div>
+      <div class="drawer-body" id="drawerBody">
+        <!-- Filled dynamically -->
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const drawerContents = {
+  lyrics: `
+    <div class="d-section">
+      <div class="d-section-title">LRC Editor</div>
+      <textarea class="d-lrc">[00:00.00] Midnight Frequencies
+[00:04.32] Riding through the neon glow
+[00:08.15] Frequencies that pulse and flow
+[00:12.48] Static on the radio
+[00:16.80] Signals from a world below
+[00:21.12] Midnight waves are calling me
+[00:25.44] Through the dark, I'm floating free
+[00:29.76] Synthetic dreams in binary
+[00:34.08] Digital eternity</textarea>
+      <div style="display:flex;gap:6px;margin-top:8px">
+        <button class="d-btn" style="flex:1">Rebuild</button>
+        <button class="d-btn primary" style="flex:1">Apply</button>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">AI Alignment</div>
+      <div class="d-card" style="margin-bottom:10px">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+          <span style="width:6px;height:6px;border-radius:50%;background:var(--green)"></span>
+          <span style="font-size:11px;color:var(--green)">67 words synced</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);line-height:1.6">
+          Riding through the neon glow<br>
+          Frequencies that pulse and flow<br>
+          Static on the radio<br>
+          Signals from a world below
+        </div>
+      </div>
+      <button class="d-btn primary" style="width:100%">Refine Lines with AI</button>
+    </div>
+    <div style="margin-top:10px;padding:6px 10px;border-radius:6px;background:rgba(251,191,36,.08);border:1px solid rgba(251,191,36,.15);font-size:11px;color:var(--amber);font-family:var(--font-mono)">
+      &#9888; 2 lines exceed 40 char limit
+    </div>
+  `,
+  style: `
+    <div class="d-section">
+      <div class="d-section-title">Template</div>
+      <select class="d-select">
+        <option>Classic Cover Lyrics</option>
+        <option>Clean Lyric Frame</option>
+        <option>Corner Pulse Logo</option>
+        <option>Cinematic Bars</option>
+      </select>
+    </div>
+    <div class="d-section">
+      <div class="d-section-title">Typography</div>
+      <div class="d-field">
+        <label class="d-label">Font</label>
+        <select class="d-select">
+          <option>Montserrat</option><option>Inter</option><option>Lora</option>
+        </select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Song Title</label>
+        <div style="display:flex;gap:6px">
+          <button class="d-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')">Visible</button>
+          <button class="d-toggle off" onclick="this.classList.toggle('on');this.classList.toggle('off')">Hidden</button>
+        </div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Colors</div>
+      <div class="d-field">
+        <label class="d-label">Active</label>
+        <div class="d-row">
+          <div class="d-color" style="background:#a78bfa"><input type="color" value="#a78bfa"></div>
+          <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">#a78bfa</span>
+        </div>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Inactive</label>
+        <div class="d-row">
+          <div class="d-color" style="background:#5c5677"><input type="color" value="#5c5677"></div>
+          <span style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted)">#5c5677</span>
+        </div>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Inactive Opacity</label>
+        <div class="d-row">
+          <input type="range" class="d-slider" min="5" max="100" value="40">
+          <span class="d-val">0.40</span>
+        </div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Scroll &amp; Position</div>
+      <div class="d-field">
+        <label class="d-label">Smoothing</label>
+        <div class="d-row">
+          <input type="range" class="d-slider" min="1" max="50" value="15">
+          <span class="d-val">0.15</span>
+        </div>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Vertical Offset</label>
+        <div class="d-row">
+          <input type="range" class="d-slider" min="-40" max="40" value="0">
+          <span class="d-val">0.00</span>
+        </div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Logo Branding</div>
+      <div class="d-field">
+        <label class="d-label">Position</label>
+        <select class="d-select">
+          <option>Bottom Right</option><option>Bottom Left</option><option>Top Right</option><option>Top Left</option>
+        </select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Effect</label>
+        <select class="d-select">
+          <option>Off</option><option>Expanding Circle</option><option>Radial Bars</option><option>Circular Wave</option>
+        </select>
+      </div>
+    </div>
+  `,
+  media: `
+    <div class="d-section">
+      <div class="d-section-title">Cover Art</div>
+      <div style="width:100%;aspect-ratio:1;border-radius:var(--r-sm);background:linear-gradient(135deg,#201d2b,#2a2640);display:flex;align-items:center;justify-content:center;font-size:36px;border:1px solid var(--border-subtle);margin-bottom:10px">
+        &#127925;
+      </div>
+      <div style="display:flex;gap:6px">
+        <button class="d-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')">Background</button>
+        <button class="d-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')">Visualizer</button>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Custom Background</div>
+      <div class="upload-zone">
+        <p>Drop image or video</p>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Watermark</div>
+      <div class="d-card" style="display:flex;align-items:center;gap:10px">
+        <div style="width:32px;height:32px;background:var(--accent-soft);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px">&#9632;</div>
+        <div style="flex:1;font-size:11px">logo.png<br><span style="color:var(--text-muted);font-family:var(--font-mono)">Persisted</span></div>
+        <button class="d-btn" style="padding:4px 8px;font-size:10px">Remove</button>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Audio Source</div>
+      <div class="upload-zone" style="padding:12px">
+        <p>Drop WAV / audio file</p>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Aspect Ratio</div>
+      <select class="d-select">
+        <option>16:9 (1920&times;1080)</option><option>9:16 (1080&times;1920)</option><option>1:1</option><option>4:3</option>
+      </select>
+    </div>
+  `,
+  timeline: `
+    <div class="d-section">
+      <div class="d-section-title">Playback Flow</div>
+      <div class="tl-flow">
+        <div class="tl-block" style="color:var(--green);border-color:rgba(110,231,183,.2)">
+          PRE<span style="font-size:8px;opacity:.7"><br>3s</span>
+        </div>
+        <div class="tl-arrow">&#8594;</div>
+        <div class="tl-block main">
+          SONG<span style="font-size:8px;opacity:.7"><br>4:07</span>
+        </div>
+        <div class="tl-arrow">&#8594;</div>
+        <div class="tl-block" style="color:var(--amber);border-color:rgba(251,191,36,.2)">
+          POST<span style="font-size:8px;opacity:.7"><br>5s</span>
+        </div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Pre-Roll</div>
+      <div class="d-field">
+        <button class="d-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="margin-bottom:8px">Enabled</button>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Type</label>
+        <select class="d-select"><option>Text Message</option><option>QR Code</option></select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Duration</label>
+        <div class="d-row">
+          <input type="range" class="d-slider" min="1" max="15" value="3">
+          <span class="d-val">3s</span>
+        </div>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Content</label>
+        <textarea class="d-input mono" rows="2" style="resize:vertical">Now playing: Midnight Frequencies</textarea>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Theme</label>
+        <select class="d-select"><option>Clean</option><option>Bold</option></select>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Post-Roll</div>
+      <div class="d-field">
+        <button class="d-toggle on" onclick="this.classList.toggle('on');this.classList.toggle('off')" style="margin-bottom:8px">Enabled</button>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Type</label>
+        <select class="d-select"><option>QR Code</option><option>Text Message</option></select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Duration</label>
+        <div class="d-row">
+          <input type="range" class="d-slider" min="1" max="15" value="5">
+          <span class="d-val">5s</span>
+        </div>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Content</label>
+        <textarea class="d-input mono" rows="2" style="resize:vertical">https://suno.com/track/midnight-freq</textarea>
+      </div>
+    </div>
+  `,
+  dsp: `
+    <div class="d-section">
+      <div class="d-section-title">Look Preset</div>
+      <div style="display:flex;gap:6px">
+        <select class="d-select" style="flex:1">
+          <option>Retro LED</option><option>Broadcast VU</option><option>Neon Spectrogram</option>
+          <option>Club Radial</option><option>Organic Ambient</option><option>Social Hybrid</option>
+        </select>
+        <button class="d-btn">Randomize</button>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Algorithm</div>
+      <div class="dsp-grid">
+        <div class="dsp-chip active" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Bars</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Oscillo</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Circle</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Wave</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Stereo</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Log Bars</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">LED</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Radial</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">W+Spec</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">VU</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Spectro</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Particle</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Organic</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">Ring</div>
+        <div class="dsp-chip" onclick="document.querySelectorAll('.dsp-chip').forEach(c=>c.classList.remove('active'));this.classList.add('active')">St. Bars</div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Parameters</div>
+      <div class="d-field">
+        <label class="d-label">Bar Count</label>
+        <select class="d-select"><option>32</option><option>64</option><option>128</option></select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Sensitivity</label>
+        <div class="d-row">
+          <input type="range" class="d-slider" min="50" max="300" value="150">
+          <span class="d-val">1.5x</span>
+        </div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Color Events (2)</div>
+      <div class="event-row">
+        <span class="event-time">0:00</span>
+        <div class="event-color" style="background:#a78bfa"></div>
+        <div class="event-color" style="background:#5c5677"></div>
+        <span style="margin-left:auto;color:var(--text-muted);cursor:pointer;font-size:13px">&times;</span>
+      </div>
+      <div class="event-row">
+        <span class="event-time">2:14</span>
+        <div class="event-color" style="background:#67e8f9"></div>
+        <div class="event-color" style="background:#5c5677"></div>
+        <span style="margin-left:auto;color:var(--text-muted);cursor:pointer;font-size:13px">&times;</span>
+      </div>
+      <button class="d-btn primary" style="width:100%;margin-top:8px">+ Add Event at 1:24</button>
+    </div>
+  `,
+  export: `
+    <div class="d-section">
+      <div class="d-section-title">Output Preview</div>
+      <div class="d-card" style="display:flex;gap:14px;align-items:center">
+        <div style="width:100px;aspect-ratio:16/9;border-radius:6px;background:#000;border:1px solid var(--border-subtle);display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:8px;color:var(--text-muted)">
+          16:9
+        </div>
+        <div style="flex:1">
+          <div style="font-size:12px;font-weight:600;margin-bottom:4px">Midnight Frequencies</div>
+          <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);line-height:1.6">
+            1920&times;1080 &middot; 30 FPS<br>
+            5 Mbps VBR &middot; Audio 192k<br>
+            Duration: 4:15
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Render Settings</div>
+      <div class="d-field">
+        <label class="d-label">Target</label>
+        <select class="d-select"><option>16:9 (1920&times;1080)</option><option>9:16 (1080&times;1920)</option></select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Frame Rate</label>
+        <select class="d-select"><option>30 FPS</option><option>60 FPS</option></select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Bitrate</label>
+        <input class="d-input mono" type="number" value="5000000" step="100000">
+      </div>
+      <div class="d-field">
+        <label class="d-label">Mode</label>
+        <select class="d-select"><option>VBR</option><option>CBR</option></select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Audio Quality</label>
+        <select class="d-select"><option>192k</option><option>128k</option><option>Max (PCM)</option></select>
+      </div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-section">
+      <div class="d-section-title">Publishing</div>
+      <div class="d-field">
+        <label class="d-label">Target Platform</label>
+        <select class="d-select"><option>YouTube</option><option>Facebook</option><option>Both</option></select>
+      </div>
+      <div class="d-field">
+        <label class="d-label">Title</label>
+        <input class="d-input" value="Midnight Frequencies — Synthwave Collective">
+      </div>
+      <div class="d-field">
+        <label class="d-label">Description</label>
+        <textarea class="d-input" rows="2" style="resize:vertical">Official visualizer for Midnight Frequencies</textarea>
+      </div>
+      <button class="d-btn primary" style="width:100%">Run Publish Workflow</button>
+    </div>
+    <div style="margin-top:16px">
+      <button class="d-btn primary" style="width:100%;padding:12px;font-size:14px;font-weight:600">Export Video Locally</button>
+      <p style="text-align:center;font-size:10px;color:var(--text-muted);margin-top:6px">Renders locally and downloads .webm</p>
+    </div>
+  `
+};
+
+const drawer = document.getElementById('drawer');
+const drawerBody = document.getElementById('drawerBody');
+const drawerTitle = document.getElementById('drawerTitle');
+const canvasCenter = document.getElementById('canvasCenter');
+const drawerClose = document.getElementById('drawerClose');
+let activeDrawer = null;
+
+const titles = {
+  lyrics:'Lyrics Editor',style:'Style & Branding',media:'Media & Assets',
+  timeline:'Timeline',dsp:'DSP Engine',export:'Export & Publish'
+};
+
+document.querySelectorAll('.tool-btn[data-drawer]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const key = btn.dataset.drawer;
+    if (activeDrawer === key) {
+      closeDrawer();
+      return;
+    }
+    document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    drawerTitle.textContent = titles[key];
+    drawerBody.innerHTML = drawerContents[key];
+    activeDrawer = key;
+    drawer.classList.add('open');
+    canvasCenter.classList.add('drawer-open');
+  });
+});
+
+function closeDrawer() {
+  drawer.classList.remove('open');
+  canvasCenter.classList.remove('drawer-open');
+  document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+  activeDrawer = null;
+}
+
+drawerClose.addEventListener('click', closeDrawer);
+
+// Play button
+const playBtn = document.getElementById('playBtn');
+playBtn.addEventListener('click', () => {
+  playBtn.innerHTML = playBtn.innerHTML.trim() === '&#9654;' ? '&#10074;&#10074;' : '&#9654;';
+});
+
+// Wave bars
+const waveContainer = document.getElementById('waveBars');
+for (let i = 0; i < 40; i++) {
+  const bar = document.createElement('div');
+  bar.className = 'canvas-wave-bar';
+  const a = Math.random() * 15 + 4;
+  const b = Math.random() * 40 + 8;
+  const d = (Math.random() * 0.8 + 0.3).toFixed(2);
+  bar.style.setProperty('--a', a + 'px');
+  bar.style.setProperty('--b', b + 'px');
+  bar.style.setProperty('--d', d + 's');
+  bar.style.animationDelay = (Math.random() * 0.5).toFixed(2) + 's';
+  waveContainer.appendChild(bar);
+}
+</script>
+</body>
+</html>

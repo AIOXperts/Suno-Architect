@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Concept A — Cinema Console (App Theme)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --app-bg-start:#1e293b;
+  --app-bg-mid:#0f172a;
+  --app-bg-end:#020617;
+  --app-panel:rgba(30,41,59,.55);
+  --app-panel-solid:#1e293b;
+  --app-panel-border:rgba(148,163,184,.22);
+  --app-tab-active:#334155;
+  --app-tab-hover:rgba(51,65,85,.55);
+  --app-accent:#a855f7;
+  --accent-15:rgba(168,85,247,.15);
+  --accent-25:rgba(168,85,247,.25);
+  --accent-30:rgba(168,85,247,.30);
+  --slate-200:#e2e8f0;
+  --slate-300:#cbd5e1;
+  --slate-400:#94a3b8;
+  --slate-500:#64748b;
+  --slate-600:#475569;
+  --slate-800:#1e293b;
+  --slate-900:#0f172a;
+  --slate-950:#020617;
+  --emerald-400:#34d399;
+  --emerald-300:#6ee7b7;
+  --amber-400:#fbbf24;
+  --amber-300:#fcd34d;
+  --red-400:#f87171;
+  --cyan-300:#67e8f9;
+  --radius-xl:0.75rem;
+  --radius-lg:0.5rem;
+  --radius-sm:0.375rem;
+  --font:'Inter',sans-serif;
+}
+html,body{height:100%;overflow:hidden;background:var(--app-bg-end);color:var(--slate-200);font-family:var(--font);font-size:14px;line-height:1.5}
+::selection{background:var(--accent-30)}
+::-webkit-scrollbar{width:6px;height:6px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(148,163,184,.2);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.35)}
+
+.app{
+  display:flex;flex-direction:column;height:100vh;
+  background-image:radial-gradient(ellipse at top,var(--app-bg-start),var(--app-bg-mid) 50%,var(--app-bg-end));
+}
+
+/* ─── Top Bar ─── */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 24px;height:48px;min-height:48px;
+  background:rgba(15,23,42,.6);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--app-panel-border);z-index:10;
+}
+.topbar-left{display:flex;align-items:center;gap:14px}
+.topbar-logo{font-size:14px;font-weight:700;color:white;letter-spacing:-.02em}
+.topbar-logo span{color:var(--app-accent)}
+.topbar-sep{width:1px;height:20px;background:var(--app-panel-border)}
+.topbar-song{font-size:13px;color:var(--slate-400);display:flex;align-items:center;gap:8px}
+.topbar-song .dot{width:6px;height:6px;border-radius:50%;background:var(--emerald-400);animation:pulse-dot 2s infinite}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+.topbar-right{display:flex;align-items:center;gap:8px}
+.topbar-btn{
+  padding:5px 14px;font-size:12px;font-weight:600;font-family:var(--font);
+  color:var(--slate-200);background:transparent;border:1px solid var(--app-panel-border);
+  border-radius:var(--radius-lg);cursor:pointer;transition:all .15s;
+}
+.topbar-btn:hover{background:var(--app-tab-hover);border-color:rgba(148,163,184,.35)}
+.topbar-btn.primary{
+  background:var(--accent-15);border-color:rgba(168,85,247,.7);color:white;
+}
+.topbar-btn.primary:hover{background:var(--accent-25)}
+
+/* ─── Canvas Area ─── */
+.canvas-area{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  position:relative;overflow:hidden;min-height:0;
+}
+.canvas-wrapper{
+  position:relative;
+  width:min(72vw,960px);aspect-ratio:16/9;
+  border-radius:var(--radius-xl);overflow:hidden;
+  border:1px solid var(--app-panel-border);
+  box-shadow:0 20px 60px rgba(0,0,0,.4),0 0 80px rgba(168,85,247,.04);
+}
+.canvas-placeholder{
+  width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  background:linear-gradient(160deg,#0f172a 0%,#020617 50%,#0f172a 100%);
+}
+.canvas-bars{display:flex;align-items:flex-end;gap:2px;height:60px;opacity:.5}
+.canvas-bar{width:3px;background:var(--app-accent);border-radius:1px 1px 0 0;animation:bar-bounce var(--dur) ease-in-out infinite alternate}
+@keyframes bar-bounce{from{height:var(--h1)}to{height:var(--h2)}}
+.canvas-label{margin-top:16px;font-size:11px;color:var(--slate-500);letter-spacing:.1em;text-transform:uppercase}
+.canvas-live-badge{
+  position:absolute;top:12px;right:12px;display:flex;align-items:center;gap:6px;
+  padding:4px 10px;background:rgba(0,0,0,.5);backdrop-filter:blur(8px);
+  border-radius:20px;font-size:10px;color:var(--emerald-400);
+  border:1px solid rgba(52,211,153,.2);
+}
+.canvas-live-badge .dot{width:5px;height:5px;border-radius:50%;background:var(--emerald-400);animation:pulse-dot 1.5s infinite}
+.canvas-title-overlay{
+  position:absolute;top:12px;left:12px;font-size:11px;
+  color:rgba(255,255,255,.25);letter-spacing:.06em;
+}
+
+/* ─── Playback Overlay ─── */
+.playback-overlay{
+  position:absolute;bottom:0;left:0;right:0;
+  padding:0 16px 12px;
+  background:linear-gradient(transparent,rgba(0,0,0,.75));
+}
+.playback-seek{
+  width:100%;height:4px;-webkit-appearance:none;appearance:none;
+  background:rgba(148,163,184,.15);border-radius:2px;outline:none;cursor:pointer;
+  margin-bottom:8px;
+}
+.playback-seek::-webkit-slider-thumb{
+  -webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:var(--app-accent);cursor:pointer;box-shadow:0 0 8px var(--accent-25);
+}
+.playback-bar{display:flex;align-items:center;gap:12px}
+.play-btn{
+  width:32px;height:32px;border-radius:50%;border:none;
+  background:rgba(255,255,255,.12);color:#fff;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(4px);transition:all .15s;font-size:12px;
+}
+.play-btn:hover{background:rgba(255,255,255,.22);transform:scale(1.05)}
+.playback-time{font-size:12px;color:var(--slate-400)}
+.playback-info{margin-left:auto;font-size:10px;color:var(--slate-500);letter-spacing:.05em;text-transform:uppercase}
+
+/* ─── Tab Strip ─── */
+.tab-strip{
+  display:flex;align-items:center;gap:0;
+  height:44px;min-height:44px;
+  background:rgba(15,23,42,.5);backdrop-filter:blur(12px);
+  border-top:1px solid var(--app-panel-border);
+  border-bottom:1px solid var(--app-panel-border);
+  padding:0 16px;overflow-x:auto;
+}
+.tab{
+  padding:8px 16px;font-size:12px;font-weight:600;color:var(--slate-500);
+  cursor:pointer;border:none;background:none;font-family:var(--font);
+  border-bottom:2px solid transparent;transition:all .15s;
+  white-space:nowrap;letter-spacing:.01em;position:relative;
+}
+.tab:hover{color:var(--slate-300)}
+.tab.active{color:var(--app-accent);border-bottom-color:var(--app-accent)}
+.tab-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:16px;height:16px;padding:0 4px;margin-left:6px;
+  font-size:9px;font-weight:600;border-radius:8px;
+  background:var(--accent-15);color:var(--app-accent);
+}
+.tab-strip-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.tab-action-btn{
+  padding:4px 12px;font-size:11px;font-weight:600;font-family:var(--font);
+  color:var(--slate-400);background:transparent;border:1px solid var(--app-panel-border);
+  border-radius:var(--radius-lg);cursor:pointer;transition:all .15s;
+}
+.tab-action-btn:hover{background:var(--app-tab-hover);color:var(--slate-200)}
+
+/* ─── Panel Content ─── */
+.panel-container{
+  height:300px;min-height:200px;max-height:40vh;
+  background:rgba(15,23,42,.4);backdrop-filter:blur(8px);
+  overflow-y:auto;padding:20px 24px;
+}
+.tab-panel{display:none}
+.tab-panel.active{display:block}
+
+.panel-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.panel-grid.three-col{grid-template-columns:1fr 1fr 1fr}
+
+.field-group{margin-bottom:14px}
+.field-group:last-child{margin-bottom:0}
+.field-label{
+  display:block;font-size:11px;font-weight:600;color:var(--slate-400);
+  text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;
+}
+.field-row{display:flex;align-items:center;gap:8px}
+
+.input{
+  width:100%;padding:7px 12px;font-size:13px;color:var(--slate-200);
+  background:var(--slate-900);border:1px solid var(--app-panel-border);border-radius:var(--radius-lg);
+  font-family:var(--font);outline:none;transition:border-color .15s,box-shadow .15s;
+}
+.input:focus{border-color:var(--app-accent);box-shadow:0 0 0 2px var(--accent-15)}
+.input.mono{font-family:ui-monospace,SFMono-Regular,SF Mono,Menlo,monospace;font-size:12px}
+
+.select{
+  padding:7px 12px;font-size:13px;color:var(--slate-200);
+  background:var(--slate-900);border:1px solid var(--app-panel-border);border-radius:var(--radius-lg);
+  font-family:var(--font);outline:none;cursor:pointer;min-width:140px;
+}
+.select:focus{border-color:var(--app-accent);box-shadow:0 0 0 2px var(--accent-15)}
+
+.color-input-wrap{display:flex;align-items:center;gap:8px}
+.color-swatch{
+  width:28px;height:28px;border-radius:var(--radius-sm);border:1px solid var(--app-panel-border);
+  cursor:pointer;overflow:hidden;position:relative;
+}
+.color-swatch input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);cursor:pointer;border:none;opacity:0}
+.color-hex{font-family:ui-monospace,monospace;font-size:11px;color:var(--slate-400)}
+
+.slider-row{display:flex;align-items:center;gap:10px}
+.slider{
+  flex:1;height:4px;-webkit-appearance:none;appearance:none;
+  background:rgba(148,163,184,.15);border-radius:2px;outline:none;
+}
+.slider::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:var(--app-accent);cursor:pointer;
+}
+.slider-val{font-family:ui-monospace,monospace;font-size:11px;color:var(--slate-400);min-width:32px;text-align:right}
+
+.toggle-btn{
+  padding:5px 12px;font-size:11px;font-weight:600;
+  border:1px solid var(--app-panel-border);border-radius:var(--radius-lg);
+  cursor:pointer;transition:all .15s;font-family:var(--font);
+}
+.toggle-btn.on{background:var(--accent-15);border-color:rgba(168,85,247,.7);color:var(--app-accent)}
+.toggle-btn.off{background:transparent;color:var(--slate-500)}
+.toggle-btn:hover{border-color:rgba(148,163,184,.35)}
+
+.card{
+  background:var(--app-panel);backdrop-filter:blur(8px);
+  border:1px solid var(--app-panel-border);border-radius:var(--radius-xl);padding:16px;
+}
+.card-title{
+  font-size:11px;font-weight:600;color:var(--slate-300);
+  text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;
+  display:flex;align-items:center;gap:8px;
+}
+.card-title .indicator{width:6px;height:6px;border-radius:50%;background:var(--emerald-400)}
+
+textarea.lrc-editor{
+  width:100%;height:140px;padding:10px 12px;font-family:ui-monospace,monospace;font-size:11px;line-height:1.7;
+  color:var(--slate-200);background:var(--slate-900);border:1px solid var(--app-panel-border);
+  border-radius:var(--radius-lg);resize:vertical;outline:none;
+}
+textarea.lrc-editor:focus{border-color:var(--app-accent);box-shadow:0 0 0 2px var(--accent-15)}
+
+.warning-list{display:flex;flex-direction:column;gap:4px;margin-top:8px}
+.warning-item{
+  font-size:11px;padding:6px 10px;border-radius:var(--radius-sm);
+}
+.warning-item.amber{background:rgba(251,191,36,.08);color:var(--amber-300);border:1px solid rgba(251,191,36,.15)}
+
+.btn-row{display:flex;gap:6px;margin-top:8px}
+.btn-sm{
+  padding:6px 12px;font-size:11px;font-weight:600;
+  border:1px solid var(--app-panel-border);border-radius:var(--radius-lg);
+  cursor:pointer;background:transparent;color:var(--slate-300);
+  font-family:var(--font);transition:all .15s;
+}
+.btn-sm:hover{background:var(--app-tab-hover);color:var(--slate-200)}
+.btn-sm.accent{border-color:rgba(168,85,247,.7);color:white;background:var(--accent-15)}
+.btn-sm.accent:hover{background:var(--accent-25)}
+
+/* Export */
+.export-preview{
+  display:flex;align-items:center;gap:16px;padding:16px;
+  background:var(--app-panel);backdrop-filter:blur(8px);
+  border:1px solid var(--app-panel-border);border-radius:var(--radius-xl);
+}
+.export-preview-thumb{
+  width:120px;aspect-ratio:16/9;border-radius:var(--radius-sm);
+  background:var(--slate-900);border:1px solid var(--app-panel-border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;color:var(--slate-500);font-family:ui-monospace,monospace;
+}
+.export-preview-info{flex:1}
+.export-preview-info h4{font-size:13px;font-weight:600;margin-bottom:4px;color:white}
+.export-preview-info p{font-size:11px;color:var(--slate-400);font-family:ui-monospace,monospace}
+
+/* Timeline */
+.timeline-flow{display:flex;align-items:center;gap:0;margin:12px 0}
+.timeline-block{
+  padding:10px 14px;font-size:11px;font-family:ui-monospace,monospace;
+  border:1px solid var(--app-panel-border);background:var(--app-panel);
+  backdrop-filter:blur(8px);text-align:center;min-width:80px;
+}
+.timeline-block.first{border-radius:var(--radius-sm) 0 0 var(--radius-sm)}
+.timeline-block.last{border-radius:0 var(--radius-sm) var(--radius-sm) 0}
+.timeline-block.main-song{background:var(--accent-15);border-color:rgba(168,85,247,.3);color:var(--app-accent);flex:1}
+.timeline-arrow{padding:0 6px;color:var(--slate-500);font-size:10px}
+
+/* DSP */
+.dsp-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.dsp-chip{
+  padding:8px 6px;font-size:10px;text-align:center;
+  border:1px solid var(--app-panel-border);border-radius:var(--radius-sm);
+  cursor:pointer;transition:all .15s;font-family:ui-monospace,monospace;
+  color:var(--slate-500);background:transparent;
+}
+.dsp-chip:hover{border-color:rgba(148,163,184,.35);color:var(--slate-300)}
+.dsp-chip.active{border-color:rgba(168,85,247,.7);color:var(--app-accent);background:var(--accent-15)}
+
+/* Color Events */
+.event-row{
+  display:flex;align-items:center;gap:8px;padding:6px 10px;
+  background:var(--app-panel);backdrop-filter:blur(8px);
+  border:1px solid var(--app-panel-border);border-radius:var(--radius-sm);
+  margin-bottom:4px;font-size:11px;
+}
+.event-time{font-family:ui-monospace,monospace;color:var(--app-accent);min-width:50px}
+.event-color{width:20px;height:20px;border-radius:3px;border:1px solid var(--app-panel-border)}
+.event-del{
+  margin-left:auto;background:none;border:none;color:var(--slate-500);
+  cursor:pointer;font-size:14px;padding:2px 6px;
+}
+.event-del:hover{color:var(--red-400)}
+
+.media-upload-zone{
+  border:2px dashed rgba(148,163,184,.2);border-radius:var(--radius-xl);
+  padding:20px;text-align:center;cursor:pointer;transition:all .15s;
+}
+.media-upload-zone:hover{border-color:rgba(168,85,247,.4);background:var(--accent-15)}
+.media-upload-zone p{font-size:11px;color:var(--slate-500)}
+
+.cover-preview{
+  width:100%;aspect-ratio:1;border-radius:var(--radius-lg);
+  background:linear-gradient(135deg,var(--slate-900),var(--slate-800));
+  display:flex;align-items:center;justify-content:center;
+  font-size:32px;border:1px solid var(--app-panel-border);margin-bottom:8px;
+}
+
+.logo-item{
+  display:flex;align-items:center;gap:8px;padding:10px;
+  background:var(--app-panel);backdrop-filter:blur(8px);
+  border:1px solid var(--app-panel-border);border-radius:var(--radius-lg);
+}
+.logo-item-info{flex:1;font-size:11px;color:var(--slate-300)}
+.logo-item-info span{color:var(--slate-500);font-family:ui-monospace,monospace;font-size:10px}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Top Bar -->
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="topbar-logo">Lyric Video <span>Visualizer</span></span>
+      <div class="topbar-sep"></div>
+      <div class="topbar-song">
+        <span class="dot"></span>
+        Midnight Frequencies — Synthwave Collective
+      </div>
+    </div>
+    <div class="topbar-right">
+      <button class="topbar-btn">Load Clip</button>
+      <button class="topbar-btn">Library</button>
+      <button class="topbar-btn primary">Export Video</button>
+    </div>
+  </div>
+
+  <!-- Canvas -->
+  <div class="canvas-area">
+    <div class="canvas-wrapper">
+      <div class="canvas-placeholder">
+        <div class="canvas-bars" id="vizBars"></div>
+        <div class="canvas-label">Live Canvas Preview</div>
+      </div>
+      <div class="canvas-live-badge"><span class="dot"></span>LIVE</div>
+      <div class="canvas-title-overlay">16:9 FHD &middot; 30 FPS</div>
+
+      <div class="playback-overlay">
+        <input type="range" class="playback-seek" min="0" max="100" value="34">
+        <div class="playback-bar">
+          <button class="play-btn" id="playBtn">&#9654;</button>
+          <span class="playback-time">1:24 / 4:07</span>
+          <span class="playback-info">Preview</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab Strip -->
+  <div class="tab-strip">
+    <button class="tab active" data-tab="lyrics">Lyrics</button>
+    <button class="tab" data-tab="style">Style &amp; Branding</button>
+    <button class="tab" data-tab="media">Media &amp; Assets</button>
+    <button class="tab" data-tab="timeline">Timeline <span class="tab-badge">3</span></button>
+    <button class="tab" data-tab="dsp">DSP Engine <span class="tab-badge">15</span></button>
+    <button class="tab" data-tab="export">Export</button>
+    <div class="tab-strip-right">
+      <button class="tab-action-btn">Presets</button>
+      <button class="tab-action-btn">Reset</button>
+    </div>
+  </div>
+
+  <!-- Panel Content -->
+  <div class="panel-container">
+
+    <!-- TAB: Lyrics -->
+    <div class="tab-panel active" id="panel-lyrics">
+      <div class="panel-grid">
+        <div>
+          <div class="field-group">
+            <label class="field-label">LRC Editor</label>
+            <textarea class="lrc-editor">[00:00.00] Midnight Frequencies
+[00:04.32] Riding through the neon glow
+[00:08.15] Frequencies that pulse and flow
+[00:12.48] Static on the radio
+[00:16.80] Signals from a world below
+[00:21.12] Midnight waves are calling me
+[00:25.44] Through the dark, I'm floating free
+[00:29.76] Synthetic dreams in binary
+[00:34.08] Digital eternity</textarea>
+          </div>
+          <div class="btn-row">
+            <button class="btn-sm accent">Rebuild LRC</button>
+            <button class="btn-sm">Apply LRC</button>
+          </div>
+          <div class="warning-list">
+            <div class="warning-item amber">&#9888; 2 lines exceed 40 char limit</div>
+          </div>
+        </div>
+        <div>
+          <div class="card">
+            <div class="card-title"><span class="indicator"></span>AI Alignment — 67 words synced</div>
+            <div class="field-group">
+              <label class="field-label">Lyric Source (Prompt)</label>
+              <div style="font-size:12px;color:var(--slate-400);line-height:1.7;padding:10px;background:var(--slate-900);border:1px solid var(--app-panel-border);border-radius:var(--radius-lg)">
+                Riding through the neon glow<br>
+                Frequencies that pulse and flow<br>
+                Static on the radio<br>
+                Signals from a world below
+              </div>
+            </div>
+            <button class="btn-sm accent" style="width:100%">Refine Lines with AI</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Style & Branding -->
+    <div class="tab-panel" id="panel-style">
+      <div class="panel-grid three-col">
+        <div>
+          <div class="field-group">
+            <label class="field-label">Template</label>
+            <select class="select" style="width:100%">
+              <option>Classic Cover Lyrics</option>
+              <option>Clean Lyric Frame</option>
+              <option>Corner Pulse Logo</option>
+              <option>Cinematic Bars</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Font Family</label>
+            <select class="select" style="width:100%">
+              <option>Montserrat</option>
+              <option>Inter</option>
+              <option>Roboto</option>
+              <option>Lora</option>
+              <option>Courier Prime</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <div class="field-group">
+            <label class="field-label">Active Color</label>
+            <div class="color-input-wrap">
+              <div class="color-swatch" style="background:#a855f7">
+                <input type="color" value="#a855f7">
+              </div>
+              <span class="color-hex">#a855f7</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Inactive Color</label>
+            <div class="color-input-wrap">
+              <div class="color-swatch" style="background:#64748b">
+                <input type="color" value="#64748b">
+              </div>
+              <span class="color-hex">#64748b</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Inactive Opacity</label>
+            <div class="slider-row">
+              <input type="range" class="slider" min="5" max="100" value="40">
+              <span class="slider-val">0.40</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="field-group">
+            <label class="field-label">Scroll Smoothing</label>
+            <div class="slider-row">
+              <input type="range" class="slider" min="1" max="50" value="15">
+              <span class="slider-val">0.15</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Vertical Position</label>
+            <div class="slider-row">
+              <input type="range" class="slider" min="-40" max="40" value="0">
+              <span class="slider-val">0.00</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Song Title</label>
+            <div style="display:flex;gap:6px">
+              <button class="toggle-btn on">Visible</button>
+              <button class="toggle-btn off">Hidden</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:16px;border-top:1px solid var(--app-panel-border);padding-top:16px">
+        <div class="panel-grid">
+          <div>
+            <label class="field-label">Logo Position</label>
+            <select class="select">
+              <option>Bottom Right</option>
+              <option>Bottom Left</option>
+              <option>Top Right</option>
+              <option>Top Left</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label">Logo Effect</label>
+            <select class="select">
+              <option>Off</option>
+              <option>Expanding Circle</option>
+              <option>Radial Bars</option>
+              <option>Circular Wave</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Media & Assets -->
+    <div class="tab-panel" id="panel-media">
+      <div class="panel-grid">
+        <div>
+          <div class="field-group">
+            <label class="field-label">Cover Art</label>
+            <div class="cover-preview">&#127925;</div>
+            <div style="display:flex;gap:6px">
+              <button class="toggle-btn on">Background Layer</button>
+              <button class="toggle-btn on">Main Visualizer</button>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Aspect Ratio</label>
+            <select class="select" style="width:100%">
+              <option>16:9 (1920x1080)</option>
+              <option>9:16 (1080x1920)</option>
+              <option>1:1 (1080x1080)</option>
+              <option>4:3 (1440x1080)</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <div class="field-group">
+            <label class="field-label">Custom Background</label>
+            <div class="media-upload-zone">
+              <p>Drag &amp; drop image or video</p>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Watermark Logo</label>
+            <div class="logo-item">
+              <div style="width:32px;height:32px;background:var(--accent-15);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:14px;color:var(--app-accent)">&#9632;</div>
+              <div class="logo-item-info">
+                logo.png<br><span>Persistence Active</span>
+              </div>
+              <button class="btn-sm" style="font-size:10px">Remove</button>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Audio Source Override</label>
+            <div class="media-upload-zone" style="padding:12px">
+              <p>Drop WAV / audio file</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Timeline -->
+    <div class="tab-panel" id="panel-timeline">
+      <div class="field-group">
+        <label class="field-label">Playback Flow</label>
+        <div class="timeline-flow">
+          <div class="timeline-block first" style="border-color:rgba(52,211,153,.3);color:var(--emerald-300)">
+            PRE-ROLL<br><span style="font-size:9px;opacity:.7">3s Text</span>
+          </div>
+          <div class="timeline-arrow">&#8594;</div>
+          <div class="timeline-block main-song">
+            SONG<br><span style="font-size:9px;opacity:.7">4:07</span>
+          </div>
+          <div class="timeline-arrow">&#8594;</div>
+          <div class="timeline-block last" style="border-color:rgba(251,191,36,.3);color:var(--amber-300)">
+            POST-ROLL<br><span style="font-size:9px;opacity:.7">5s QR</span>
+          </div>
+        </div>
+      </div>
+      <div class="panel-grid">
+        <div class="card">
+          <div class="card-title">Pre-Roll</div>
+          <div class="field-group">
+            <div style="display:flex;gap:6px;margin-bottom:8px">
+              <button class="toggle-btn on">Enabled</button>
+            </div>
+            <label class="field-label">Type</label>
+            <select class="select" style="width:100%">
+              <option>Text Message</option>
+              <option>QR Code</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Duration</label>
+            <div class="slider-row">
+              <input type="range" class="slider" min="1" max="15" value="3">
+              <span class="slider-val">3s</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Text Content</label>
+            <textarea class="input mono" rows="2" style="resize:vertical">Now playing: Midnight Frequencies</textarea>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Card Theme</label>
+            <select class="select"><option>Clean</option><option>Bold</option></select>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">Post-Roll</div>
+          <div class="field-group">
+            <div style="display:flex;gap:6px;margin-bottom:8px">
+              <button class="toggle-btn on">Enabled</button>
+            </div>
+            <label class="field-label">Type</label>
+            <select class="select" style="width:100%">
+              <option>QR Code</option>
+              <option>Text Message</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Duration</label>
+            <div class="slider-row">
+              <input type="range" class="slider" min="1" max="15" value="5">
+              <span class="slider-val">5s</span>
+            </div>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Text / URL</label>
+            <textarea class="input mono" rows="2" style="resize:vertical">https://suno.com/track/midnight-freq</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: DSP Engine -->
+    <div class="tab-panel" id="panel-dsp">
+      <div class="field-group">
+        <label class="field-label">Look Preset</label>
+        <div style="display:flex;gap:6px;margin-bottom:12px">
+          <select class="select" style="flex:1">
+            <option>Retro LED</option>
+            <option>Broadcast VU</option>
+            <option>Neon Spectrogram</option>
+            <option>Club Radial</option>
+            <option>Organic Ambient</option>
+            <option>Social Hybrid</option>
+          </select>
+          <button class="btn-sm accent">Apply</button>
+          <button class="btn-sm">Randomize</button>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Algorithm</label>
+        <div class="dsp-grid">
+          <div class="dsp-chip active">Bars</div>
+          <div class="dsp-chip">Oscilloscope</div>
+          <div class="dsp-chip">Circle</div>
+          <div class="dsp-chip">Wave</div>
+          <div class="dsp-chip">Stereo Wave</div>
+          <div class="dsp-chip">Stereo Bars</div>
+          <div class="dsp-chip">Log Bars</div>
+          <div class="dsp-chip">LED Bars</div>
+          <div class="dsp-chip">Radial</div>
+          <div class="dsp-chip">Wave+Spec</div>
+          <div class="dsp-chip">VU Meter</div>
+          <div class="dsp-chip">Spectrogram</div>
+          <div class="dsp-chip">Particles</div>
+          <div class="dsp-chip">Organic</div>
+          <div class="dsp-chip">Ring</div>
+        </div>
+      </div>
+      <div style="margin-top:14px" class="panel-grid">
+        <div>
+          <div class="field-group">
+            <label class="field-label">Bar Count</label>
+            <select class="select"><option>32</option><option>64</option><option>128</option></select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Sensitivity</label>
+            <div class="slider-row">
+              <input type="range" class="slider" min="50" max="300" value="150">
+              <span class="slider-val">1.5x</span>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="field-group">
+            <label class="field-label">Color Events <span style="color:var(--app-accent)">(2)</span></label>
+            <div class="event-row">
+              <span class="event-time">0:00</span>
+              <div class="event-color" style="background:#a855f7"></div>
+              <div class="event-color" style="background:#64748b"></div>
+              <button class="event-del">&times;</button>
+            </div>
+            <div class="event-row">
+              <span class="event-time">2:14</span>
+              <div class="event-color" style="background:#c084fc"></div>
+              <div class="event-color" style="background:#64748b"></div>
+              <button class="event-del">&times;</button>
+            </div>
+            <button class="btn-sm accent" style="margin-top:6px;width:100%">+ Add Event at 1:24</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Export -->
+    <div class="tab-panel" id="panel-export">
+      <div class="export-preview">
+        <div class="export-preview-thumb">16:9<br>1920&times;1080</div>
+        <div class="export-preview-info">
+          <h4>Midnight Frequencies — Visualizer.webm</h4>
+          <p>30 FPS &middot; 5 Mbps VBR &middot; Audio 192k<br>Total duration: 4:15 (with rolls)</p>
+        </div>
+      </div>
+      <div class="panel-grid" style="margin-top:14px">
+        <div>
+          <div class="field-group">
+            <label class="field-label">Render Target</label>
+            <select class="select" style="width:100%">
+              <option>16:9 (1920&times;1080)</option>
+              <option>9:16 (1080&times;1920)</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label class="field-label">Frame Rate</label>
+            <select class="select" style="width:100%"><option>30 FPS</option><option>60 FPS</option></select>
+          </div>
+        </div>
+        <div>
+          <div class="field-group">
+            <label class="field-label">Bitrate</label>
+            <input class="input mono" type="number" value="5000000" step="100000">
+          </div>
+          <div class="field-group">
+            <label class="field-label">Mode</label>
+            <select class="select"><option>VBR</option><option>CBR</option></select>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--app-panel-border)">
+        <div class="card-title">Publishing Workflow</div>
+        <div class="panel-grid">
+          <div>
+            <label class="field-label">Target</label>
+            <select class="select" style="width:100%"><option>YouTube</option><option>Facebook</option><option>Both</option></select>
+          </div>
+          <div>
+            <label class="field-label">Title</label>
+            <input class="input" value="Midnight Frequencies — Synthwave Collective" style="width:100%">
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('.tab[data-tab]').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+  });
+});
+
+const playBtn = document.getElementById('playBtn');
+playBtn.addEventListener('click', () => {
+  playBtn.innerHTML = playBtn.innerHTML === '&#9654;' ? '&#10074;&#10074;' : '&#9654;';
+});
+
+document.querySelectorAll('.dsp-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.querySelectorAll('.dsp-chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+  });
+});
+
+const barsContainer = document.getElementById('vizBars');
+for (let i = 0; i < 32; i++) {
+  const bar = document.createElement('div');
+  bar.className = 'canvas-bar';
+  const h1 = Math.random() * 20 + 5;
+  const h2 = Math.random() * 50 + 10;
+  const dur = (Math.random() * 0.8 + 0.3).toFixed(2);
+  bar.style.setProperty('--h1', h1 + 'px');
+  bar.style.setProperty('--h2', h2 + 'px');
+  bar.style.setProperty('--dur', dur + 's');
+  bar.style.animationDelay = (Math.random() * 0.5).toFixed(2) + 's';
+  barsContainer.appendChild(bar);
+}
+
+document.querySelectorAll('.toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const isOn = btn.classList.contains('on');
+    btn.classList.toggle('on', !isOn);
+    btn.classList.toggle('off', isOn);
+  });
+});
+</script>
+</body>
+</html>

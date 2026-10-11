@@ -17,7 +17,6 @@ const eqPresets: Record<string, MasteringSettings['eq']> = {
 
 const outputPresets = {
   streaming: { sampleRate: 48000, bitDepth: 24 as const },
-  studio: { sampleRate: 48000, bitDepth: 24 as const },
   cd: { sampleRate: 44100, bitDepth: 16 as const },
 };
 
@@ -36,8 +35,8 @@ const boolFields: Array<[keyof MasteringSettings, string]> = [
 ];
 
 const eqFields: Array<[keyof MasteringSettings['eq'], string]> = [
-  ['low', '80Hz'],
-  ['lowMid', '250Hz'],
+  ['low', '100Hz'],
+  ['lowMid', '400Hz'],
   ['mid', '1kHz'],
   ['highMid', '4kHz'],
   ['high', '12kHz'],

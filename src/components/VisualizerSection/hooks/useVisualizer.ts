@@ -4,7 +4,7 @@ import { SunoClip, AlignedWord, Qt6Style, AIProviderConfig } from '../../../type
 import { getLyricAlignment, getSunoClip } from '../../../services/sunoApi';
 import { ASPECT_RATIOS } from '../../../constants';
 import { drawCover, drawQt6Visualizer, drawScrollingLyrics, drawCornerPulseVisualizer, drawLogoCircularWave, drawLogoExpandingCircle, drawLogoWatermark, type VisualizerFrameData } from '../../../utils/visualizer';
-import { groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords, groupWordsByLrcWithText, generateLrc, parseLrc, detectLongLyricLines, detectLongLrcGaps } from '../../../utils/lyrics';
+import { groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords, groupWordsByLrcWithText, generateLrc, parseLrc, detectLongLyricLines, detectLongLrcGaps, looksLikeTimedLyricsJson, parseTimedLyricsJson } from '../../../utils/lyrics';
 import { performOfflineRender } from '../../../utils/offlineRender';
 import { createProvider, getDefaultModelForProvider, validateProviderConfig } from '../../../services/providers/providerFactory';
 
@@ -710,7 +710,37 @@ export const useVisualizer = (
     }, [alignment, lyricSource]);
 
     const handleApplyLrc = useCallback(() => {
-        if (!alignment) return;
+        if (looksLikeTimedLyricsJson(lrcDraft)) {
+            try {
+                const imported = parseTimedLyricsJson(lrcDraft);
+                setAlignment(imported.alignment);
+                setLines(imported.lines);
+                setLyricSource(imported.lyricSource);
+                setLrcDraft(imported.lrcContent);
+                setLrcApplyStatus('applied');
+                if (clipData) {
+                    onUpdateClip(clipData.id, { alignmentData: imported.alignment, lrcContent: imported.lrcContent });
+                    setClipData(prev => prev ? ({
+                        ...prev,
+                        alignmentData: imported.alignment,
+                        lrcContent: imported.lrcContent
+                    }) : prev);
+                }
+                setTimeout(() => setLrcApplyStatus('idle'), 2000);
+                return;
+            } catch (error: any) {
+                setLrcApplyStatus('error');
+                setTimeout(() => setLrcApplyStatus('idle'), 2500);
+                alert(error?.message || 'Failed to parse timed lyrics JSON.');
+                return;
+            }
+        }
+        if (!alignment) {
+            setLrcApplyStatus('error');
+            setTimeout(() => setLrcApplyStatus('idle'), 2500);
+            alert('Load Suno alignment first, or paste timed JSON such as WhisperX output.');
+            return;
+        }
         const parsed = parseLrc(lrcDraft);
         if (parsed.invalidLineNumbers.length > 0) {
             setLrcApplyStatus('error');

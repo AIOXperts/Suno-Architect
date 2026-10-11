@@ -1235,9 +1235,13 @@ export default {
       if (isRateLimited(request, "suno-proxy", 120, 60 * 1000)) {
         return json(request, env, { error: "Rate limit exceeded. Slow down and retry." }, 429);
       }
-      const authResult = await requireAuth(request, env);
-      if (authResult instanceof Response) return authResult;
-      return handleSunoRequest(request, env, "https://studio-api.prod.suno.com/api/generate/v2/");
+      const authHeader = request.headers.get("Authorization");
+      const customCookieHeader = request.headers.get("X-Suno-Cookie");
+      if (!authHeader && !customCookieHeader) {
+        const authResult = await requireAuth(request, env);
+        if (authResult instanceof Response) return authResult;
+      }
+      return handleSunoRequest(request, env, "https://studio-api-prod.suno.com/api/generate/v2-web/");
     }
 
     if (url.pathname === "/api/publish/youtube" && request.method === "POST") {
@@ -1259,64 +1263,26 @@ async function handleSunoRequest(request: Request, env: Env, targetUrl: string) 
   const authHeader = request.headers.get("Authorization");
   const customCookieHeader = request.headers.get("X-Suno-Cookie");
 
-  let deviceId: string = crypto.randomUUID();
-  if (customCookieHeader) {
-    try {
-      const parts = customCookieHeader.split(";");
-      for (const part of parts) {
-        const [key, value] = part.split("=");
-        if (key && key.trim() === "ajs_anonymous_id") {
-          let val = (value || "").trim();
-          try {
-            val = decodeURIComponent(val);
-          } catch {}
-          deviceId = val.replace(/^"+|"+$/g, "");
-          break;
-        }
-      }
-    } catch {}
-  }
+  const browserTimestamp = Date.now();
+  const browserTokenB64 = btoa(JSON.stringify({ timestamp: browserTimestamp }));
 
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    "User-Agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Affiliate-Id": "undefined",
-    "Device-Id": `"${deviceId}"`,
-    "x-suno-client": "Android prerelease-4nt180t 1.0.42",
-    "X-Requested-With": "com.suno.android",
-    "sec-ch-ua": '"Chromium";v="130", "Android WebView";v="130", "Not?A_Brand";v="99"',
-    "sec-ch-ua-mobile": "?1",
-    "sec-ch-ua-platform": '"Android"',
+    "accept": "*/*",
+    "accept-language": "en",
+    "content-type": "application/json",
+    "browser-token": JSON.stringify({ token: browserTokenB64 }),
+    "device-id": "bf11e528-6a7b-4697-98aa-5f2d7ceeb194",
+    "origin": "https://suno.com",
+    "referer": "https://suno.com/",
+    "user-agent":
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
   };
 
   if (authHeader) headers["Authorization"] = authHeader;
-  if (customCookieHeader) headers["Cookie"] = customCookieHeader;
-
-  try {
-    const checkResponse = await fetch("https://studio-api.prod.suno.com/api/c/check", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ ctype: "generation" }),
-    });
-
-    if (checkResponse.ok) {
-      const checkData = (await checkResponse.json()) as any;
-      if (checkData?.required !== false) {
-        return json(
-          request,
-          env,
-          {
-            error:
-              "Suno CAPTCHA verification required. Please login to Suno.com, solve verification if prompted, and update your token in Settings.",
-            detail: "Verification Required",
-          },
-          403
-        );
-      }
-    }
-  } catch (e) {
-    console.warn("Suno captcha check failed, proceeding anyway", e);
+  if (customCookieHeader) {
+    headers["Cookie"] = customCookieHeader;
+  } else if (authHeader && authHeader.startsWith("Bearer ey")) {
+    headers["Cookie"] = `__session=${authHeader.slice(7).trim()}`;
   }
 
   try {
@@ -1332,6 +1298,6 @@ async function handleSunoRequest(request: Request, env: Env, targetUrl: string) 
       headers: { "Content-Type": "application/json", ...buildCorsHeaders(request, env) },
     });
   } catch (err: any) {
-    return json(request, env, { error: err?.message || "Proxy Error" }, 500);
+    return json(request, env, { error: err?.message || "Proxy Error" }, 502);
   }
 }
