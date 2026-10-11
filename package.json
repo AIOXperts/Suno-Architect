@@ -5,9 +5,16 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:authed": "bun run suno:auth && vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:e2e": "playwright test"
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "suno:login": "bun run scripts/suno-browser-session.ts",
+    "suno:auth": "bun run scripts/suno-auth.ts",
+    "suno:backup": "bun run scripts/suno-playlist-backup.ts",
+    "suno:matrix": "bun run scripts/suno-cover-matrix.ts"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -30,9 +37,11 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.4",
+    "fake-indexeddb": "^6.2.5",
     "tailwindcss": "^4.2.0",
     "typescript": "~5.8.3",
     "vite": "^6.4.1",
+    "vitest": "^5.0.3",
     "wrangler": "^4.67.0"
   },
   "overrides": {
