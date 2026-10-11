@@ -75,7 +75,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         const ytJson = await ytRes.json();
         if (!ytRes.ok) throw new Error(ytJson?.error || 'YouTube publish failed.');
         setPublishState('done');
-        setPublishMessage(`YouTube publish queued (${ytJson?.jobId || 'stub'}).`);
+        setPublishMessage(`Simulated: YouTube publish queued (stub).`);
         return;
       }
 
@@ -84,7 +84,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
         const fbJson = await fbRes.json();
         if (!fbRes.ok) throw new Error(fbJson?.error || 'Facebook publish failed.');
         setPublishState('done');
-        setPublishMessage(`Facebook publish queued (${fbJson?.jobId || 'stub'}).`);
+        setPublishMessage(`Simulated: Facebook publish queued (stub).`);
         return;
       }
 
@@ -97,7 +97,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
       const ytJson = await ytRes.json();
       if (!ytRes.ok) throw new Error(ytJson?.error || 'YouTube publish failed.');
       setPublishState('done');
-      setPublishMessage(`Cross-publish complete. FB (${fbJson?.jobId || 'stub'}) -> YT (${ytJson?.jobId || 'stub'}).`);
+      setPublishMessage(`Simulated: Cross-publish complete. FB -> YT (stub).`);
     } catch (error: any) {
       console.error('Publish workflow failed', error);
       setPublishState('error');
@@ -110,7 +110,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
     { key: 'style', label: 'Style & Branding' },
     { key: 'media', label: 'Media & Assets' },
     { key: 'timeline', label: 'Timeline', badge: state.preRollEnabled || state.postRollEnabled ? '●' : undefined },
-    { key: 'dsp', label: 'DSP Engine', badge: state.mainVisualizerEnabled ? `${handlers.applyQt6LookPreset ? '15' : ''}` : undefined },
+    { key: 'dsp', label: 'DSP Engine', badge: state.mainVisualizerEnabled ? 'ON' : undefined },
     { key: 'export', label: 'Export' },
   ];
 
@@ -465,6 +465,12 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 </div>
               </summary>
               <div className="mt-2 space-y-3 p-4 rounded-xl border border-[var(--app-panel-border)] bg-[var(--app-panel)] backdrop-blur-sm">
+                <div data-testid="publish-dry-run-banner" role="status" className="flex items-start gap-2 px-3 py-2 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300 text-xs leading-relaxed">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+                  </svg>
+                  <span>Dry-run preview — no upload happens yet (YouTube/Facebook publishing is not connected).</span>
+                </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                   <AppSelect value={publishTarget} onChange={(e) => setPublishTarget(e.target.value as 'youtube' | 'facebook' | 'both')} className="h-10">
                     <option value="youtube">Publish: YouTube (16:9)</option>
@@ -481,7 +487,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                 <AppInput value={publishTitle} onChange={(e) => setPublishTitle(e.target.value)} placeholder="Publish title" />
                 <AppTextarea value={publishDescription} onChange={(e) => setPublishDescription(e.target.value)} placeholder="Publish description" className="h-24 resize-y" />
                 <AppButton variant="primary" onClick={handlePublish} disabled={!state.clipData || publishState === 'publishing'} className="w-full">
-                  {publishState === 'publishing' ? 'Publishing...' : 'Run Publish Workflow'}
+                  {publishState === 'publishing' ? 'Publishing...' : 'Run Dry-Run Publish Preview'}
                 </AppButton>
                 <StatusMessage state={publishState} message={publishMessage} />
               </div>
@@ -525,17 +531,18 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
               <div className="flex items-center gap-1">
                 <AppInput
                   type="text"
-                  placeholder="Paste Suno ID..."
+                  placeholder="Or paste Suno ID / UUID manually..."
                   value={state.manualId}
                   onChange={(e) => setters.setManualId(e.target.value)}
                   className="w-40 text-xs"
                 />
-                <AppButton variant="secondary" size="sm" onClick={handlers.handleManualLoad}>Load</AppButton>
+                <AppButton variant="secondary" size="sm" onClick={handlers.handleManualLoad}>Load ID</AppButton>
               </div>
             </>
           )}
           <button
             onClick={() => setShowLibraryPicker(true)}
+            aria-label="Open library picker"
             className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition-colors text-xs"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -576,6 +583,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
                     <button
                       type="button"
                       onClick={handlers.togglePlay}
+                      aria-label={state.isPlaying ? 'Pause' : 'Play'}
                       className="w-8 h-8 min-h-0 p-0 flex items-center justify-center rounded-full bg-white/15 text-white border border-white/20 hover:bg-white/25 backdrop-blur-sm transition-colors cursor-pointer"
                     >
                       {state.isPlaying ? (
