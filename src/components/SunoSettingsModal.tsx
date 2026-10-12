@@ -203,15 +203,25 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
   };
 
   const tokenSnippet = `(async () => {
-  const sessionToken = await window?.Clerk?.session?.getToken?.();
+  // suno.com does not expose window.Clerk, but the __session cookie is readable.
+  const sessionToken = /(?:^|; )__session=([^;]+)/.exec(document.cookie)?.[1];
 
   if (!sessionToken) {
-    console.error("Session token not found. Make sure you are logged in at suno.com");
+    console.error("No __session cookie found. Make sure you are logged in at suno.com, then reload and try again.");
     return;
   }
 
   console.log("%c Suno Session Token Found! ", "background: #222; color: #bada55; font-size: 14px;");
   console.log(sessionToken);
+
+  try {
+    const check = await fetch("https://studio-api.prod.suno.com/api/billing/info/", {
+      headers: { Authorization: "Bearer " + sessionToken },
+    });
+    console.log("Token check:", check.status, check.ok ? "OK" : "rejected");
+  } catch (err) {
+    console.warn("Token check skipped:", err);
+  }
 
   const copyWithExecCommand = (text) => {
     const textarea = document.createElement("textarea");
@@ -245,7 +255,7 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
   }
 
   if (copied) {
-    console.log("%c Result copied to clipboard automatically.", "color: gray;");
+    console.log("%c Token copied to clipboard. Paste it into Suno Architect > Settings > Connection.", "color: gray;");
   } else {
     console.warn("Auto-copy failed. Token is printed above for manual copy.");
   }
@@ -308,7 +318,8 @@ const SunoSettingsModal: React.FC<SunoSettingsModalProps> = ({
                         <p className="text-xs text-slate-400 mb-3">
                             1. Go to suno.com and log in.<br/>
                             2. Open Developer Tools (F12) &gt; Console.<br/>
-                            3. Paste this code and hit Enter.
+                            3. Paste this code and hit Enter.<br/>
+                            4. Paste the copied token below. Session tokens expire after about an hour, so repeat when sync starts failing.
                         </p>
                         <div className="bg-black/50 rounded-lg p-3 overflow-x-auto border border-white/5 shadow-inner">
                             <pre className="text-[10px] font-mono text-slate-400 whitespace-pre-wrap">{tokenSnippet}</pre>
