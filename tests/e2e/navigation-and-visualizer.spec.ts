@@ -2,6 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test } from '@playwright/test';
 
+// Never let e2e pages reach the real Suno API through the same-origin passthrough.
+test.beforeEach(async ({ context }) => {
+  await context.route('**/api/suno/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+  );
+});
+
+
 test('persists selected tab through URL/local state reload', async ({ page }) => {
   await page.goto('/');
   await page.locator('[data-view-tab="albums"]').click();

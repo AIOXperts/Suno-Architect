@@ -69,6 +69,47 @@ function sunoDevProxyPlugin(env: Record<string, string>): Plugin {
           return;
         }
 
+        if (req.url?.startsWith('/api/suno/api/')) {
+          const chunks: Buffer[] = [];
+          req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+          req.on('end', async () => {
+            try {
+              const method = req.method || 'GET';
+              const targetUrl = `https://studio-api.prod.suno.com${req.url!.slice('/api/suno'.length)}`;
+              const headers: Record<string, string> = {
+                'accept': '*/*',
+                'accept-language': 'en',
+                'origin': 'https://suno.com',
+                'referer': 'https://suno.com/',
+                'user-agent':
+                  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+              };
+              if (req.headers['content-type']) headers['content-type'] = String(req.headers['content-type']);
+              const authHeader = req.headers['authorization'] as string | undefined;
+              const customCookie = req.headers['x-suno-cookie'] as string | undefined;
+              if (authHeader) headers['authorization'] = authHeader;
+              if (customCookie) headers['cookie'] = customCookie;
+
+              const hasBody = method !== 'GET' && method !== 'HEAD';
+              const sunoRes = await fetch(targetUrl, {
+                method,
+                headers,
+                body: hasBody ? Buffer.concat(chunks) : undefined,
+              });
+              const resText = await sunoRes.text();
+              res.statusCode = sunoRes.status;
+              res.setHeader('Content-Type', sunoRes.headers.get('content-type') || 'application/json');
+              res.end(resText);
+            } catch (err: any) {
+              console.error('[suno-dev-proxy] passthrough error:', err);
+              res.statusCode = 502;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: err?.message || 'Failed to reach Suno' }));
+            }
+          });
+          return;
+        }
+
         if (req.url === '/api/suno-proxy' && req.method === 'POST') {
           const chunks: Buffer[] = [];
           req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));

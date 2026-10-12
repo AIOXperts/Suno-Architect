@@ -53,6 +53,19 @@ const normalizeSunoAuth = (raw: string): { bearerToken?: string; cookie?: string
 
 export const SUNO_API_BASE = "https://studio-api.prod.suno.com";
 export const SUNO_AUTH_BASE = "https://auth.suno.com";
+
+const isBrowser = typeof window !== "undefined" && typeof document !== "undefined";
+
+/**
+ * studio-api only emits CORS headers for https://suno.com, so browser callers must go
+ * through the same-origin passthrough (`/api/suno/*`, served by the Worker in production
+ * and by the Vite dev plugin locally). Node scripts talk to studio-api directly.
+ */
+export const resolveSunoApiBase = (): string => {
+    if (!isBrowser) return SUNO_API_BASE;
+    const configured = (import.meta.env?.VITE_SUNO_API_PROXY_URL as string | undefined)?.trim();
+    return (configured || "/api/suno").replace(/\/+$/, "");
+};
 /** Clerk JS version shim required by Suno's auth host (FAPI rejects requests without it). */
 export const SUNO_CLERK_JS_VERSION = "5.100.0";
 
@@ -74,7 +87,8 @@ export const buildSunoAuthHeaders = (cookie?: string): Record<string, string> =>
     if (auth.bearerToken) {
         headers["Authorization"] = `Bearer ${auth.bearerToken}`;
     } else if (auth.cookie) {
-        headers["Cookie"] = auth.cookie;
+        // Browsers forbid setting `Cookie`; the passthrough maps X-Suno-Cookie back to Cookie.
+        headers[isBrowser ? "X-Suno-Cookie" : "Cookie"] = auth.cookie;
     } else {
         throw new SunoApiError("Invalid Suno token/cookie format");
     }
@@ -92,7 +106,7 @@ const sunoFetch = async <T = unknown>(
 ): Promise<T> => {
     if (!cookie?.trim()) throw new SunoApiError("No Suno token/cookie provided");
 
-    const response = await fetch(`${SUNO_API_BASE}${path}`, {
+    const response = await fetch(`${resolveSunoApiBase()}${path}`, {
         method: init?.method ?? "GET",
         headers: buildSunoAuthHeaders(cookie),
         body: init?.body === undefined ? undefined : JSON.stringify(init.body),
@@ -115,7 +129,7 @@ export const getSunoPlaylist = async (playlistIdOrUrl: string, cookie?: string):
 
     // Public playlists are readable without auth; only build auth headers when a credential exists.
     if (!cookie?.trim()) {
-        const response = await fetch(`${SUNO_API_BASE}${path}`, {
+        const response = await fetch(`${resolveSunoApiBase()}${path}`, {
             method: "GET",
             headers: { "Content-Type": "application/json", "accept": "*/*" },
         });
@@ -842,7 +856,7 @@ export const updateSunoMetadata = async (clipId: string, data: ParsedSunoOutput,
     if (!cookie) throw new Error("No cookie provided");
 
     // Point to the metadata proxy
-    const PROXY_ENDPOINT = `https://studio-api.prod.suno.com/api/gen/${clipId}/set_metadata/`;
+    const PROXY_ENDPOINT = `${resolveSunoApiBase()}/api/gen/${clipId}/set_metadata/`;
     
     // Construct payload
     const payload = {

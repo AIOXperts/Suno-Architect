@@ -1,5 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
+// Never let e2e pages reach the real Suno API through the same-origin passthrough.
+test.beforeEach(async ({ context }) => {
+  await context.route('**/api/suno/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }),
+  );
+});
+
+
 /**
  * Library management e2e (roadmap tasks 4, 6, 8, 9, 15).
  *

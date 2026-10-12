@@ -1231,6 +1231,20 @@ export default {
       return json(request, env, { error: "Method not allowed" }, 405);
     }
 
+    if (url.pathname.startsWith("/api/suno/")) {
+      if (isRateLimited(request, "suno-passthrough", 240, 60 * 1000)) {
+        return json(request, env, { error: "Rate limit exceeded. Slow down and retry." }, 429);
+      }
+      const authHeader = request.headers.get("Authorization");
+      const customCookieHeader = request.headers.get("X-Suno-Cookie");
+      if (!authHeader && !customCookieHeader) {
+        const authResult = await requireAuth(request, env);
+        if (authResult instanceof Response) return authResult;
+        return json(request, env, { error: "Suno credential required (Authorization or X-Suno-Cookie header)." }, 401);
+      }
+      return handleSunoPassthrough(request, env, url);
+    }
+
     if (url.pathname === "/api/suno-proxy" && request.method === "POST") {
       if (isRateLimited(request, "suno-proxy", 120, 60 * 1000)) {
         return json(request, env, { error: "Rate limit exceeded. Slow down and retry." }, 429);
@@ -1255,6 +1269,54 @@ export default {
     return env.ASSETS.fetch(request);
   },
 };
+
+const SUNO_STUDIO_API_BASE = "https://studio-api.prod.suno.com";
+const SUNO_PASSTHROUGH_PREFIX = "/api/suno";
+
+/**
+ * Same-origin passthrough for studio-api. studio-api only sends CORS headers for
+ * https://suno.com, so the browser cannot call it directly; the client sends its own
+ * Suno credential (Authorization or X-Suno-Cookie) and we forward it verbatim.
+ */
+async function handleSunoPassthrough(request: Request, env: Env, url: URL): Promise<Response> {
+  const targetPath = url.pathname.slice(SUNO_PASSTHROUGH_PREFIX.length);
+  if (!targetPath.startsWith("/api/")) {
+    return json(request, env, { error: "Unsupported Suno path" }, 404);
+  }
+
+  const headers: Record<string, string> = {
+    "accept": "*/*",
+    "accept-language": "en",
+    "origin": "https://suno.com",
+    "referer": "https://suno.com/",
+    "user-agent":
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+  };
+  const contentType = request.headers.get("Content-Type");
+  if (contentType) headers["content-type"] = contentType;
+
+  const authHeader = request.headers.get("Authorization");
+  const customCookieHeader = request.headers.get("X-Suno-Cookie");
+  if (authHeader) headers["Authorization"] = authHeader;
+  if (customCookieHeader) headers["Cookie"] = customCookieHeader;
+
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
+  try {
+    const upstream = await fetch(`${SUNO_STUDIO_API_BASE}${targetPath}${url.search}`, {
+      method: request.method,
+      headers,
+      body: hasBody ? await request.arrayBuffer() : undefined,
+    });
+    const responseHeaders: Record<string, string> = {
+      "Content-Type": upstream.headers.get("content-type") || "application/json",
+      "Cache-Control": "no-store",
+      ...buildCorsHeaders(request, env),
+    };
+    return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
+  } catch (err: any) {
+    return json(request, env, { error: err?.message || "Suno upstream error" }, 502);
+  }
+}
 
 async function handleSunoRequest(request: Request, env: Env, targetUrl: string) {
   const body = await parseJsonBody(request);
