@@ -1,5 +1,5 @@
 const ASSET_CACHE = 'suno-architect-assets-v1';
-const CACHEABLE_EXTENSIONS = ['.mp3', '.wav', '.png', '.jpg', '.jpeg'];
+const CACHEABLE_EXTENSIONS = ['.mp3', '.m4a', '.wav', '.png', '.jpg', '.jpeg'];
 
 const isCacheableAsset = (url) => {
     const lower = url.pathname.toLowerCase();

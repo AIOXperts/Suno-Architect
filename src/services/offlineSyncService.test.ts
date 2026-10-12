@@ -12,12 +12,16 @@ import {
 } from './offlineSyncService';
 
 // sunoApi / lyrics are only used by network paths not exercised here; stub to keep the import light.
-vi.mock('./sunoApi', () => ({
-  getLyricAlignment: vi.fn(),
-  getSunoClip: vi.fn(),
-  getSunoFeedAll: vi.fn(),
-  getSunoPlaylist: vi.fn(),
-}));
+vi.mock('./sunoApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./sunoApi')>();
+  return {
+    ...actual,
+    getLyricAlignment: vi.fn(),
+    getSunoClip: vi.fn(),
+    getSunoFeedAll: vi.fn(),
+    getSunoPlaylist: vi.fn(),
+  };
+});
 
 const NOW = 1_000_000;
 

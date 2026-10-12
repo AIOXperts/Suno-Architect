@@ -28,8 +28,14 @@ export interface SunoClip {
   title: string;
   created_at: string;
   model_name: string;
+  /** e.g. "v6" from the feed's major_model_version */
+  majorModelVersion?: string;
   imageUrl?: string;
   imageLargeUrl?: string;
+  /** Playable/downloadable audio URL from the feed's media_urls (CloudFront m4a since late 2025). */
+  audioUrl?: string;
+  /** media_urls content_type, e.g. "m4a-opus" or "mp3". */
+  audioContentType?: string;
   explicit?: boolean;
   metadata: {
     tags: string;
@@ -40,6 +46,23 @@ export interface SunoClip {
     min_bpm?: number;
     avg_bpm?: number;
     key?: string;
+    // Generation parameters reported by the feed (all optional; absent on older clips)
+    is_max_mode?: boolean;
+    /** control_sliders.aug_creativity: 0=Off, 1=Normal, 2=High, 3=Extra, 4=Max */
+    variety?: VarietyLevel;
+    /** control_sliders.weirdness_constraint 0..1 */
+    weirdness_constraint?: number;
+    /** control_sliders.style_weight 0..1 */
+    style_weight?: number;
+    /** control_sliders.audio_weight 0..1 (covers/extensions) */
+    audio_weight?: number;
+    make_instrumental?: boolean;
+    has_vocal?: boolean;
+    vox_render_mode?: string;
+    task?: string;
+    cover_clip_id?: string;
+    is_remix?: boolean;
+    uses_latest_model?: boolean;
   };
   originalData?: ParsedSunoOutput;
   alignmentData?: AlignedWord[];

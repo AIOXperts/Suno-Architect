@@ -4,6 +4,7 @@ import CopyButton from '../CopyButton';
 import { getLyricAlignment } from '../../services/sunoApi';
 import { matchWordsToPrompt, stripMetaTags, generateLrc, generateSrt } from '../../utils/lyrics';
 import { addSongToAlbum, createAlbum, getSongMeta, listAlbums, removeSongFromAlbum, setSongTags } from '../../services/libraryService';
+import { audioExtensionForContentType, formatVarietyName, legacySunoAudioUrl } from '../../services/sunoApi';
 
 interface DetailsModalProps {
   clip: SunoClip;
@@ -279,7 +280,50 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
       avgBpm: clip.metadata?.avg_bpm,
       key: clip.metadata?.key,
       explicit: clip.explicit,
-      duration: clip.metadata?.duration
+      duration: clip.metadata?.duration,
+
+      // Generation parameters (from the feed; absent on older/draft clips)
+      isMaxMode: clip.metadata?.is_max_mode,
+      variety: clip.metadata?.variety,
+      audioInfluence: typeof clip.metadata?.audio_weight === 'number' ? Math.round(clip.metadata.audio_weight * 100) : undefined,
+      instrumental: clip.metadata?.make_instrumental,
+      voxRenderMode: clip.metadata?.vox_render_mode,
+      task: clip.metadata?.task,
+      coverClipId: clip.metadata?.cover_clip_id,
+      isRemix: clip.metadata?.is_remix,
+      modelVersion: clip.majorModelVersion,
+  };
+
+  const audioUrl = clip.audioUrl || legacySunoAudioUrl(clip.id);
+  const audioExt = clip.audioUrl ? audioExtensionForContentType(clip.audioContentType) : 'mp3';
+  const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
+  const [audioDownloadError, setAudioDownloadError] = useState<string | null>(null);
+
+  const handleDownloadAudio = async () => {
+      setAudioDownloadError(null);
+      setIsDownloadingAudio(true);
+      try {
+          const response = await fetch(audioUrl);
+          if (!response.ok) throw new Error(`Audio request failed (${response.status})`);
+          const blob = await response.blob();
+          const blobUrl = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = blobUrl;
+          link.download = `${(clip.title || 'song').replace(/[\\/:*?"<>|]+/g, '_')}.${audioExt}`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(blobUrl);
+      } catch (err: any) {
+          console.warn('Audio download failed', err);
+          setAudioDownloadError(
+              clip.audioUrl
+                  ? `Download failed: ${err?.message || 'unknown error'}.`
+                  : 'No audio link for this clip yet. Refresh history from Suno to fetch the current download URL.'
+          );
+      } finally {
+          setIsDownloadingAudio(false);
+      }
   };
 
   return (
@@ -391,6 +435,54 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
                         </div>
                     </div>
                 </div>
+
+                {/* Generation parameters */}
+                {(clipData.isMaxMode !== undefined || clipData.variety !== undefined || clipData.instrumental !== undefined || clipData.modelVersion || clipData.task) && (
+                    <div className="bg-[var(--app-panel)] border border-[var(--app-panel-border)] rounded-lg p-4 grid grid-cols-2 sm:grid-cols-4 gap-4" data-testid="generation-params">
+                        <div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Model</span>
+                            <span className="text-sm font-mono text-white">{clipData.modelVersion ? clipData.modelVersion.toUpperCase() : clip.model_name}</span>
+                        </div>
+                        <div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Max Mode</span>
+                            <span className={`text-sm font-mono ${clipData.isMaxMode ? 'text-pink-300' : 'text-slate-400'}`}>
+                                {clipData.isMaxMode === undefined ? 'N/A' : clipData.isMaxMode ? 'On' : 'Off'}
+                            </span>
+                        </div>
+                        <div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Variety</span>
+                            <span className="text-sm font-mono text-white">{clipData.variety === undefined ? 'N/A' : formatVarietyName(clipData.variety)}</span>
+                        </div>
+                        <div>
+                            <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Vocals</span>
+                            <span className="text-sm font-mono text-white">
+                                {clipData.instrumental ? 'Instrumental' : clipData.voxRenderMode ? `Vocal (${clipData.voxRenderMode})` : clipData.instrumental === false ? 'Vocal' : 'N/A'}
+                            </span>
+                        </div>
+                        {clipData.audioInfluence !== undefined && (
+                            <div>
+                                <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Audio Influence</span>
+                                <span className="text-sm font-mono text-white">{clipData.audioInfluence}%</span>
+                            </div>
+                        )}
+                        {(clipData.task || clipData.isRemix) && (
+                            <div className="col-span-2">
+                                <span className="text-[10px] text-slate-500 font-bold uppercase block mb-1">Type</span>
+                                <span className="text-sm font-mono text-white break-all">
+                                    {clipData.task === 'cover' ? 'Cover' : clipData.isRemix ? 'Remix' : clipData.task}
+                                    {clipData.coverClipId && (
+                                        <>
+                                            {' of '}
+                                            <a href={`https://suno.com/song/${clipData.coverClipId}`} target="_blank" rel="noopener noreferrer" className="text-[var(--app-accent)] hover:underline">
+                                                {clipData.coverClipId.slice(0, 8)}…
+                                            </a>
+                                        </>
+                                    )}
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                )}
 
                 {/* Additional BPM Stats if available */}
                 {(clipData.maxBpm || clipData.minBpm) && (
@@ -712,20 +804,23 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
             <div className="p-4 border-t border-[var(--app-panel-border)] bg-[var(--app-panel)] flex justify-end gap-3">
                     {!isDraft && (
                         <>
-                            <a 
-                            href={`https://cdn1.suno.ai/${clip.id}.mp3`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-4 py-2 bg-[var(--app-panel)] hover:bg-[var(--app-tab-hover)] border border-slate-600 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2"
-                            title="Download MP3"
+                            {audioDownloadError && (
+                                <span className="text-xs text-red-400 self-center mr-auto" role="alert">{audioDownloadError}</span>
+                            )}
+                            <button
+                            type="button"
+                            onClick={handleDownloadAudio}
+                            disabled={isDownloadingAudio}
+                            className="px-4 py-2 bg-[var(--app-panel)] hover:bg-[var(--app-tab-hover)] border border-slate-600 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60"
+                            title={`Download audio (${audioExt.toUpperCase()})`}
                             >
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                                 <polyline points="7 10 12 15 17 10" />
                                 <line x1="12" y1="15" x2="12" y2="3" />
                             </svg>
-                            MP3
-                            </a>
+                            {isDownloadingAudio ? 'Downloading…' : audioExt.toUpperCase()}
+                            </button>
 
                             <a 
                             href={`https://suno.com/song/${clip.id}`}

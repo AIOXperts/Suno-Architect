@@ -281,6 +281,9 @@ export const getSunoFeedOfflineAware = async (
                 duration: t.metadata.durationMs / 1000,
             },
             audio_url: t.audioUrl,
+            media_urls: t.audioUrl
+                ? [{ url: t.audioUrl, content_type: t.audioUrl.endsWith('.m4a') ? 'm4a-opus' : 'mp3', delivery: 'progressive' }]
+                : [],
         })),
     };
 };
@@ -356,6 +359,43 @@ export interface SunoMediaUrl {
     delivery?: string;
     encoding?: string;
 }
+
+/** studio-api returns this placeholder in `audio_url`; real links live in `media_urls[]`. */
+export const SUNO_FORBIDDEN_AUDIO_URL = `${SUNO_API_BASE}/api/forbidden`;
+
+/** Legacy public MP3 path. cdn1 now requires CloudFront signed cookies, so this is a last resort only. */
+export const legacySunoAudioUrl = (clipId: string): string => `https://cdn1.suno.ai/${clipId}.mp3`;
+
+/** File extension for a media_urls content_type ("m4a-opus" → "m4a", "mp3" → "mp3"). */
+export const audioExtensionForContentType = (contentType?: string): string => {
+    const base = (contentType || '').toLowerCase().split('-')[0];
+    return base === 'mp3' || base === 'm4a' || base === 'wav' || base === 'ogg' ? base : 'm4a';
+};
+
+/**
+ * Picks the best playable audio URL from a raw feed/playlist clip:
+ * media_urls (mp3 preferred, then m4a, then anything with a url), falling back to
+ * audio_url/song_path only when they are not the forbidden placeholder.
+ */
+export const pickSunoAudioUrl = (clip: any): { url: string; contentType?: string } | undefined => {
+    const media: SunoMediaUrl[] = Array.isArray(clip?.media_urls) ? clip.media_urls : [];
+    const withUrl = media.filter((m) => typeof m?.url === 'string' && m.url.length > 0);
+    const rank = (m: SunoMediaUrl) => {
+        const ct = (m.content_type || '').toLowerCase();
+        if (ct.startsWith('mp3')) return 0;
+        if (ct.startsWith('m4a')) return 1;
+        return 2;
+    };
+    const best = [...withUrl].sort((a, b) => rank(a) - rank(b))[0];
+    if (best?.url) return { url: best.url, contentType: best.content_type };
+
+    for (const candidate of [clip?.audio_url, clip?.song_path, clip?.audioUrl]) {
+        if (typeof candidate === 'string' && candidate && !candidate.startsWith(SUNO_FORBIDDEN_AUDIO_URL)) {
+            return { url: candidate, contentType: candidate.endsWith('.m4a') ? 'm4a' : 'mp3' };
+        }
+    }
+    return undefined;
+};
 
 export interface SunoPlaylistClipRecord {
     id: string;

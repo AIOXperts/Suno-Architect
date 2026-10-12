@@ -95,8 +95,14 @@ const HistoryCard: React.FC<HistoryCardProps> = ({ clip, onClick, isDraft }) => 
             </h3>
             <div className="flex items-center gap-2 text-xs text-slate-500">
                 <span className={`font-mono px-1.5 py-0.5 rounded ${isDraft ? 'bg-slate-700 text-slate-300' : 'bg-slate-900 text-slate-400'}`}>
-                    {clip.model_name}
+                    {clip.majorModelVersion ? clip.majorModelVersion.toUpperCase() : clip.model_name}
                 </span>
+                {clip.metadata?.is_max_mode && (
+                    <span className="font-mono px-1.5 py-0.5 rounded bg-pink-900/40 text-pink-300 border border-pink-700/40" title="Generated with Max mode">MAX</span>
+                )}
+                {clip.metadata?.make_instrumental && (
+                    <span className="font-mono px-1.5 py-0.5 rounded bg-slate-900 text-slate-400" title="Instrumental">INST</span>
+                )}
                 <span>•</span>
                 <span>{new Date(clip.created_at).toLocaleDateString()}</span>
             </div>

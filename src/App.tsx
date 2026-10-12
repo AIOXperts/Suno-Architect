@@ -3,11 +3,11 @@ import InputSection from './components/InputSection/InputSection';
 import OutputSection from './components/OutputSection/OutputSection';
 import { Header } from './components/Header';
 import { generateSunoPromptWithProvider } from './services/geminiService';
-import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, FileContext, AIProviderConfig, GenerationOptions, AppTheme, AppLayout } from './types';
+import { GenerationState, SunoClip, ParsedSunoOutput, PromptSettings, ViewMode, FileContext, AIProviderConfig, GenerationOptions, AppTheme, AppLayout, VarietyLevel } from './types';
 import { DEFAULT_SUNO_LIBRARY, DEFAULT_LYRICAL_CONSTRAINTS, buildKnowledgeBase, GET_PROMPT_V1, APP_THEMES, APP_LAYOUTS } from './constants';
 import Footer from './components/Footer';
 import { SettingsModal } from './components/SettingsModal';
-import { getSunoCredits, updateSunoMetadata, getSunoFeed, getSunoFeedOfflineAware, getSunoClip, getSunoPlaylist, isSunoUnauthorizedError } from './services/sunoApi';
+import { getSunoCredits, updateSunoMetadata, getSunoFeed, getSunoFeedOfflineAware, getSunoClip, getSunoPlaylist, isSunoUnauthorizedError, pickSunoAudioUrl } from './services/sunoApi';
 import { downloadAccountCache, mirrorHistoryToLibrary } from './services/offlineSyncService';
 import { saveHistorySafely } from './utils/historyStorage';
 import HistorySection from './components/HistorySection/HistorySection';
@@ -154,8 +154,17 @@ const getViewFromUrl = (): ViewMode | null => {
 };
 
 // Helper to map API response to SunoClip
+const stripUndefined = <T extends object>(obj: T): Partial<T> =>
+    Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined)) as Partial<T>;
+
 const mapSunoClip = (clip: any): SunoClip => {
     const metadata = clip.metadata || {};
+    const sliders: Record<string, unknown> = metadata.control_sliders || {};
+    const audio = pickSunoAudioUrl(clip);
+    const asNumber = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
+    const asBool = (v: unknown): boolean | undefined => (typeof v === 'boolean' ? v : undefined);
+    const asStr = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
+    const variety = asNumber(sliders.aug_creativity);
     const tags = metadata.tags || '';
     const prompt = metadata.prompt || '';
     const title = clip.title || 'Untitled';
@@ -166,8 +175,8 @@ const mapSunoClip = (clip: any): SunoClip => {
         excludeStyles: metadata.negative_tags || '',
         advancedParams: '',
         vocalGender: '',
-        weirdness: metadata.control_sliders?.weirdness_constraint ? Math.round(metadata.control_sliders.weirdness_constraint * 100) : 50,
-        styleInfluence: metadata.control_sliders?.style_weight ? Math.round(metadata.control_sliders.style_weight * 100) : 50,
+        weirdness: typeof sliders.weirdness_constraint === 'number' ? Math.round(sliders.weirdness_constraint * 100) : 50,
+        styleInfluence: typeof sliders.style_weight === 'number' ? Math.round(sliders.style_weight * 100) : 50,
         lyricsWithTags: prompt,
         lyricsAlone: stripMetaTags(prompt),
         fullResponse: ''
@@ -178,8 +187,11 @@ const mapSunoClip = (clip: any): SunoClip => {
         title: title,
         created_at: clip.created_at,
         model_name: clip.model_name || 'unknown',
+        majorModelVersion: asStr(clip.major_model_version),
         imageUrl: clip.image_url,
         imageLargeUrl: clip.image_large_url,
+        audioUrl: audio?.url,
+        audioContentType: audio?.contentType,
         explicit: clip.explicit,
         metadata: {
             tags: tags,
@@ -190,6 +202,18 @@ const mapSunoClip = (clip: any): SunoClip => {
             min_bpm: metadata.min_bpm,
             avg_bpm: metadata.avg_bpm,
             key: metadata.key,
+            is_max_mode: asBool(metadata.is_max_mode),
+            variety: variety !== undefined ? (Math.max(0, Math.min(4, Math.round(variety))) as VarietyLevel) : undefined,
+            weirdness_constraint: asNumber(sliders.weirdness_constraint),
+            style_weight: asNumber(sliders.style_weight),
+            audio_weight: asNumber(sliders.audio_weight),
+            make_instrumental: asBool(metadata.make_instrumental),
+            has_vocal: asBool(metadata.has_vocal),
+            vox_render_mode: asStr(metadata.vox_render_mode),
+            task: asStr(metadata.task),
+            cover_clip_id: asStr(metadata.cover_clip_id),
+            is_remix: asBool(metadata.is_remix),
+            uses_latest_model: asBool(metadata.uses_latest_model),
         },
         originalData: originalData
     };
@@ -557,9 +581,15 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
                     
                     map.set(newClip.id, {
                         ...newClip,
+                        audioUrl: newClip.audioUrl || existing.audioUrl,
+                        audioContentType: newClip.audioContentType || existing.audioContentType,
+                        majorModelVersion: newClip.majorModelVersion || existing.majorModelVersion,
                         originalData: isRich ? existing.originalData : newClip.originalData,
                         metadata: {
+                            // Rich (locally generated) rows keep their metadata, but fresh generation
+                            // parameters and audio details from the feed always win when present.
                             ...(isRich ? existing.metadata : newClip.metadata),
+                            ...(isRich ? stripUndefined(newClip.metadata) : {}),
                             // Always prefer new metadata for these fields if they are present in the fresh fetch
                             avg_bpm: newClip.metadata.avg_bpm || existing.metadata.avg_bpm,
                             key: newClip.metadata.key || existing.metadata.key,
