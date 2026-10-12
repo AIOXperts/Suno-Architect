@@ -608,6 +608,20 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
             </div>
           </div>
 
+          {state.audioIssue && !state.customAudio && (
+            <div className="mx-4 mb-3 flex flex-wrap items-center gap-3 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2" role="status" data-testid="visualizer-audio-issue">
+              <span>
+                {state.audioIssue.message}
+                {state.audioIssue.needsUnlock && ' Unlocking uses 1 of your monthly Suno downloads.'}
+              </span>
+              {state.audioIssue.needsUnlock && (
+                <button type="button" onClick={handlers.unlockAudio} disabled={state.isUnlockingAudio} className="px-3 py-1 rounded bg-amber-500/80 hover:bg-amber-400 text-black font-bold disabled:opacity-60">
+                  {state.isUnlockingAudio ? 'Unlocking\u2026' : 'Unlock & Play'}
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Hidden audio element */}
           <audio
             ref={refs.audioRef}

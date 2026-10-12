@@ -4,7 +4,7 @@ import CopyButton from '../CopyButton';
 import { getLyricAlignment } from '../../services/sunoApi';
 import { matchWordsToPrompt, stripMetaTags, generateLrc, generateSrt } from '../../utils/lyrics';
 import { addSongToAlbum, createAlbum, getSongMeta, listAlbums, removeSongFromAlbum, setSongTags } from '../../services/libraryService';
-import { audioExtensionForContentType, formatVarietyName, resolveSunoAudioUrl, SunoDownloadError } from '../../services/sunoApi';
+import { audioExtensionForContentType, authorizeSunoDownload, formatVarietyName, getSunoDownloadQuota, resolveSunoAudioUrl, SunoDownloadError, SunoDownloadFormat, SunoDownloadQuota } from '../../services/sunoApi';
 
 interface DetailsModalProps {
   clip: SunoClip;
@@ -294,41 +294,73 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
       modelVersion: clip.majorModelVersion,
   };
 
-  const audioExt = clip.audioUrl ? audioExtensionForContentType(clip.audioContentType) : 'mp3';
+  const [downloadFormat, setDownloadFormat] = useState<SunoDownloadFormat>('mp3');
   const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
-  const [audioDownloadError, setAudioDownloadError] = useState<{ message: string; needsUnlock?: boolean } | null>(null);
+  const [audioDownloadError, setAudioDownloadError] = useState<string | null>(null);
+  const [unlockPrompt, setUnlockPrompt] = useState<{ quota?: SunoDownloadQuota } | null>(null);
+  const [isUnlocking, setIsUnlocking] = useState(false);
 
-  const handleDownloadAudio = async () => {
+  const saveBlob = (blob: Blob, ext: string) => {
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `${(clip.title || 'song').replace(/[\\/:*?"<>|]+/g, '_')}.${ext}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(blobUrl);
+  };
+
+  /** Resolves a presigned link (songs must be unlocked on the account) and saves the file. */
+  const downloadResolved = async (format: SunoDownloadFormat) => {
+      let url = format === 'mp3' ? clip.audioUrl : undefined; // rare direct mp3 media URL
+      let ext: string = format;
+      if (!url) {
+          if (!sunoCookie) throw new Error('Connect your Suno account in Settings to download audio.');
+          url = (await resolveSunoAudioUrl(clip.id, sunoCookie, format)).url;
+      } else {
+          ext = audioExtensionForContentType(clip.audioContentType);
+      }
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Audio request failed (${response.status})`);
+      saveBlob(await response.blob(), ext);
+  };
+
+  const handleDownloadAudio = async (format: SunoDownloadFormat = downloadFormat) => {
       setAudioDownloadError(null);
+      setUnlockPrompt(null);
       setIsDownloadingAudio(true);
       try {
-          // Suno serves downloads as short-lived presigned links for songs the account has
-          // unlocked; a direct mp3/wav media URL (rare) is used as-is.
-          let url = clip.audioUrl;
-          if (!url) {
-              if (!sunoCookie) throw new Error('Connect your Suno account in Settings to download audio.');
-              url = (await resolveSunoAudioUrl(clip.id, sunoCookie)).url;
-          }
-          const response = await fetch(url);
-          if (!response.ok) throw new Error(`Audio request failed (${response.status})`);
-          const blob = await response.blob();
-          const blobUrl = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = `${(clip.title || 'song').replace(/[\\/:*?"<>|]+/g, '_')}.${audioExt}`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(blobUrl);
+          await downloadResolved(format);
       } catch (err: any) {
           console.warn('Audio download failed', err);
-          if (err instanceof SunoDownloadError) {
-              setAudioDownloadError({ message: err.message, needsUnlock: err.reason !== 'rate_limited' && err.reason !== 'pending_timeout' });
+          if (err instanceof SunoDownloadError && err.needsUnlock && sunoCookie) {
+              // Ask before spending a monthly download; show how many are left.
+              const quota = await getSunoDownloadQuota(sunoCookie).catch(() => undefined);
+              setUnlockPrompt({ quota });
+          } else if (err instanceof SunoDownloadError) {
+              setAudioDownloadError(err.message);
           } else {
-              setAudioDownloadError({ message: `Download failed: ${err?.message || 'unknown error'}` });
+              setAudioDownloadError(`Download failed: ${err?.message || 'unknown error'}`);
           }
       } finally {
           setIsDownloadingAudio(false);
+      }
+  };
+
+  const handleUnlockAndDownload = async () => {
+      if (!sunoCookie) return;
+      setIsUnlocking(true);
+      setAudioDownloadError(null);
+      try {
+          await authorizeSunoDownload(clip.id, sunoCookie);
+          setUnlockPrompt(null);
+          await downloadResolved(downloadFormat);
+      } catch (err: any) {
+          console.warn('Unlock failed', err);
+          setAudioDownloadError(err instanceof SunoDownloadError ? err.message : `Unlock failed: ${err?.message || 'unknown error'}`);
+      } finally {
+          setIsUnlocking(false);
       }
   };
 
@@ -811,32 +843,42 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
                     {!isDraft && (
                         <>
                             {audioDownloadError && (
-                                <span className="text-xs text-red-400 self-center mr-auto" role="alert">
-                                    {audioDownloadError.message}
-                                    {audioDownloadError.needsUnlock && (
-                                        <>
-                                            {' '}
-                                            <a href={`https://suno.com/song/${clip.id}`} target="_blank" rel="noopener noreferrer" className="underline text-[var(--app-accent)]">
-                                                Unlock on Suno
-                                            </a>
-                                            {' (uses one of your plan\u2019s monthly downloads).'}
-                                        </>
-                                    )}
-                                </span>
+                                <span className="text-xs text-red-400 self-center mr-auto" role="alert">{audioDownloadError}</span>
                             )}
+                            {unlockPrompt && (
+                                <div className="mr-auto flex items-center gap-3 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2" role="alertdialog" data-testid="unlock-prompt">
+                                    <span>
+                                        This song isn\u2019t unlocked for download yet. Unlocking uses 1 of your monthly Suno downloads
+                                        {unlockPrompt.quota ? ` (${unlockPrompt.quota.remaining} left${unlockPrompt.quota.periodEnd ? `, refreshes ${new Date(unlockPrompt.quota.periodEnd).toLocaleDateString()}` : ''})` : ''}.
+                                    </span>
+                                    <button type="button" onClick={handleUnlockAndDownload} disabled={isUnlocking} className="px-3 py-1 rounded bg-amber-500/80 hover:bg-amber-400 text-black font-bold disabled:opacity-60 whitespace-nowrap">
+                                        {isUnlocking ? 'Unlocking\u2026' : 'Unlock & Download'}
+                                    </button>
+                                    <button type="button" onClick={() => setUnlockPrompt(null)} className="text-slate-300 hover:text-white">Cancel</button>
+                                </div>
+                            )}
+                            <select
+                            value={downloadFormat}
+                            onChange={(e) => setDownloadFormat(e.target.value as SunoDownloadFormat)}
+                            aria-label="Download format"
+                            className="px-2 py-2 bg-[var(--app-panel)] border border-slate-600 text-white text-sm rounded-lg"
+                            >
+                                <option value="mp3">MP3</option>
+                                <option value="wav">WAV</option>
+                            </select>
                             <button
                             type="button"
-                            onClick={handleDownloadAudio}
-                            disabled={isDownloadingAudio}
+                            onClick={() => handleDownloadAudio()}
+                            disabled={isDownloadingAudio || isUnlocking}
                             className="px-4 py-2 bg-[var(--app-panel)] hover:bg-[var(--app-tab-hover)] border border-slate-600 text-white text-sm font-bold rounded-lg transition-colors flex items-center gap-2 disabled:opacity-60"
-                            title={`Download audio (${audioExt.toUpperCase()})`}
+                            title={`Download ${downloadFormat.toUpperCase()}`}
                             >
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                                 <polyline points="7 10 12 15 17 10" />
                                 <line x1="12" y1="15" x2="12" y2="3" />
                             </svg>
-                            {isDownloadingAudio ? 'Downloading…' : audioExt.toUpperCase()}
+                            {isDownloadingAudio ? 'Downloading…' : 'Download'}
                             </button>
 
                             <a 

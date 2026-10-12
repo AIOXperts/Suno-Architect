@@ -411,14 +411,69 @@ export class SunoDownloadError extends SunoApiError {
         this.name = 'SunoDownloadError';
         this.reason = reason;
     }
+    /** The song has not been unlocked on this account yet (authorizeSunoDownload would fix it). */
+    get needsUnlock(): boolean { return this.reason === 'not_authorized'; }
+    get isRateLimited(): boolean { return this.reason === 'rate_limited'; }
 }
+
+export type SunoDownloadFormat = 'mp3' | 'wav' | 'mp4';
 
 export interface SunoDownloadResolution {
     url: string;
     /** Unix ms when the presigned link stops working (parsed from the URL), if known. */
     expiresAt?: number;
-    format: 'mp3';
+    format: SunoDownloadFormat;
 }
+
+export interface SunoDownloadAuthorization {
+    ok: true;
+    alreadyUnlocked: boolean;
+    creditDeducted: boolean;
+}
+
+export interface SunoDownloadQuota {
+    used: number;
+    limit: number;
+    /** Extra downloads from purchased packs. */
+    additional: number;
+    remaining: number;
+    /** ISO date when the monthly allowance refreshes, if known. */
+    periodEnd?: string;
+}
+
+/**
+ * Unlocks a song for download on the account. THIS SPENDS ONE OF THE PLAN'S MONTHLY
+ * DOWNLOADS (unless the song was already unlocked) — only call after explicit user
+ * confirmation. Mirrors suno.com's own "Unlock & Download" button.
+ */
+export const authorizeSunoDownload = async (clipId: string, cookie: string): Promise<SunoDownloadAuthorization> => {
+    if (!clipId) throw new SunoDownloadError('invalid_clip', 'No clip id provided');
+    const raw = await sunoFetch<any>('/api/download/authorize', cookie, {
+        method: 'POST',
+        body: { item_id: clipId, item_type: 'clip' },
+    });
+    if (raw?.ok !== true) {
+        const reason = typeof raw?.reason === 'string' ? raw.reason : 'authorization_failed';
+        throw new SunoDownloadError(reason, typeof raw?.message === 'string' && raw.message ? raw.message : 'Suno refused to unlock this song.');
+    }
+    return { ok: true, alreadyUnlocked: raw.already_unlocked === true, creditDeducted: raw.credit_deducted === true };
+};
+
+/** Reads the download allowance from /api/billing/info/ (download_usage). */
+export const getSunoDownloadQuota = async (cookie: string): Promise<SunoDownloadQuota | undefined> => {
+    const info = await sunoFetch<any>('/api/billing/info/', cookie);
+    const usage = info?.download_usage;
+    if (!usage || typeof usage !== 'object') return undefined;
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+    const used = num(usage.current_period_downloads_used);
+    const limit = num(usage.current_period_downloads_limit);
+    const additional = num(usage.additional_download_remaining);
+    return {
+        used, limit, additional,
+        remaining: Math.max(0, limit - used) + additional,
+        periodEnd: typeof info?.period_end === 'string' ? info.period_end : undefined,
+    };
+};
 
 const presignedExpiryMs = (url: string): number | undefined => {
     try {
@@ -439,18 +494,20 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export const getSunoDownloadUrl = async (
     clipId: string,
     cookie: string,
-    options?: { pollAttempts?: number; pollDelayMs?: number }
+    options?: { format?: SunoDownloadFormat; pollAttempts?: number; pollDelayMs?: number }
 ): Promise<SunoDownloadResolution> => {
     if (!clipId) throw new SunoDownloadError('invalid_clip', 'No clip id provided');
-    const attempts = Math.max(1, options?.pollAttempts ?? 6);
+    const format: SunoDownloadFormat = options?.format ?? 'mp3';
+    // WAV/MP4 are rendered on demand server-side and can report "pending" for a while.
+    const attempts = Math.max(1, options?.pollAttempts ?? (format === 'mp3' ? 6 : 20));
     const delay = options?.pollDelayMs ?? 2000;
 
     for (let i = 0; i < attempts; i++) {
-        const raw = await sunoFetch<any>(`/api/download/clip/${encodeURIComponent(clipId)}`, cookie);
+        const raw = await sunoFetch<any>(`/api/download/clip/${encodeURIComponent(clipId)}?format=${format}`, cookie);
         const ok = raw?.ok === true;
         const url = typeof raw?.download_url === 'string' ? raw.download_url : '';
         if (ok && url) {
-            return { url, expiresAt: presignedExpiryMs(url), format: 'mp3' };
+            return { url, expiresAt: presignedExpiryMs(url), format };
         }
         if (ok && raw?.status && raw.status !== 'ready') {
             if (i < attempts - 1) await sleep(delay);
@@ -471,15 +528,20 @@ const downloadUrlCache = new Map<string, SunoDownloadResolution>();
 const inflightDownloadUrl = new Map<string, Promise<SunoDownloadResolution>>();
 
 /** Cached + de-duplicated getSunoDownloadUrl; reuses a presigned link until ~1 min before expiry. */
-export const resolveSunoAudioUrl = async (clipId: string, cookie: string): Promise<SunoDownloadResolution> => {
-    const cached = downloadUrlCache.get(clipId);
+export const resolveSunoAudioUrl = async (
+    clipId: string,
+    cookie: string,
+    format: SunoDownloadFormat = 'mp3'
+): Promise<SunoDownloadResolution> => {
+    const key = `${clipId}:${format}`;
+    const cached = downloadUrlCache.get(key);
     if (cached && (!cached.expiresAt || cached.expiresAt - Date.now() > 60_000)) return cached;
-    const pending = inflightDownloadUrl.get(clipId);
+    const pending = inflightDownloadUrl.get(key);
     if (pending) return pending;
-    const task = getSunoDownloadUrl(clipId, cookie)
-        .then((res) => { downloadUrlCache.set(clipId, res); return res; })
-        .finally(() => inflightDownloadUrl.delete(clipId));
-    inflightDownloadUrl.set(clipId, task);
+    const task = getSunoDownloadUrl(clipId, cookie, { format })
+        .then((res) => { downloadUrlCache.set(key, res); return res; })
+        .finally(() => inflightDownloadUrl.delete(key));
+    inflightDownloadUrl.set(key, task);
     return task;
 };
 

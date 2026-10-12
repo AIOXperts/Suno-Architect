@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SunoClip, AlignedWord, Qt6Style, AIProviderConfig } from '../../../types';
-import { getLyricAlignment, getSunoClip, resolveSunoAudioUrl, isEncryptedSunoStream } from '../../../services/sunoApi';
+import { getLyricAlignment, getSunoClip, resolveSunoAudioUrl, isEncryptedSunoStream, authorizeSunoDownload, SunoDownloadError } from '../../../services/sunoApi';
 import { ASPECT_RATIOS } from '../../../constants';
 import { drawCover, drawQt6Visualizer, drawScrollingLyrics, drawCornerPulseVisualizer, drawLogoCircularWave, drawLogoExpandingCircle, drawLogoWatermark, type VisualizerFrameData } from '../../../utils/visualizer';
 import { groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords, groupWordsByLrcWithText, generateLrc, parseLrc, detectLongLyricLines, detectLongLrcGaps, looksLikeTimedLyricsJson, parseTimedLyricsJson } from '../../../utils/lyrics';
@@ -229,6 +229,25 @@ export const useVisualizer = (
     const [renderError, setRenderError] = useState<string | null>(null);
     const [renderSpeed, setRenderSpeed] = useState(0);
     const [isPreparing, setIsPreparing] = useState(false);
+    /** Why the selected clip has no playable audio (e.g. not unlocked on Suno). */
+    const [audioIssue, setAudioIssue] = useState<{ message: string; needsUnlock?: boolean } | null>(null);
+    const [isUnlockingAudio, setIsUnlockingAudio] = useState(false);
+
+    /** Spends one monthly Suno download to unlock the clip, then loads its presigned MP3. Called only from an explicit user click. */
+    const unlockAudio = useCallback(async () => {
+        if (!selectedClipId || !sunoCookie) return;
+        setIsUnlockingAudio(true);
+        try {
+            await authorizeSunoDownload(selectedClipId, sunoCookie);
+            const resolved = await resolveSunoAudioUrl(selectedClipId, sunoCookie);
+            setClipData(prev => prev && prev.id === selectedClipId ? { ...prev, audioUrl: resolved.url, audioContentType: 'mp3' } : prev);
+            setAudioIssue(null);
+        } catch (e: any) {
+            setAudioIssue({ message: e?.message || 'Unlock failed', needsUnlock: e instanceof SunoDownloadError && e.needsUnlock });
+        } finally {
+            setIsUnlockingAudio(false);
+        }
+    }, [selectedClipId, sunoCookie]);
     const [isGrouping, setIsGrouping] = useState(false);
     const [progress, setProgress] = useState(0); 
     const [audioDuration, setAudioDuration] = useState(0);
@@ -554,14 +573,22 @@ export const useVisualizer = (
 
             // Browsers cannot play Suno's encrypted progressive stream; fetch a presigned MP3
             // link for unlocked songs instead (cached ~1h, never spends download credits).
+            setAudioIssue(null);
             if (sunoCookie && !selectedClipId.startsWith('draft_') && (!currentClip.audioUrl || isEncryptedSunoStream(currentClip.audioUrl))) {
                 try {
                     const resolved = await resolveSunoAudioUrl(selectedClipId, sunoCookie);
                     currentClip = { ...currentClip, audioUrl: resolved.url, audioContentType: 'mp3' };
                 } catch (e: any) {
                     console.warn('No playable audio link for clip', selectedClipId, e?.message || e);
+                    if (!cancelled) {
+                        setAudioIssue(e instanceof SunoDownloadError
+                            ? { message: e.message, needsUnlock: e.needsUnlock }
+                            : { message: `Could not load audio: ${e?.message || 'unknown error'}` });
+                    }
                 }
                 if (cancelled) return;
+            } else if (!sunoCookie && !selectedClipId.startsWith('draft_') && !currentClip.audioUrl) {
+                setAudioIssue({ message: 'Connect your Suno account in Settings to stream this song.' });
             }
             setClipData(currentClip);
 
@@ -1839,7 +1866,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
             smoothingFactor, verticalOffset, qt6Style, qt6BarCount, qt6Sensitivity, qt6SpectrogramSpeed, qt6ParticleDensity, qt6RingCount, qt6LedSegments, qt6SpectrogramPalette,
             clipData, alignment, lines, lyricSource, lrcDraft, applyStatus, lrcApplyStatus, savedPresets,
             longLineIssues, longLrcGapIssues, lrcInvalidLineNumbers: lrcParseResult.invalidLineNumbers, lrcParsedLineCount: lrcParseResult.entries.length,
-            isRendering, renderProgress, renderError, renderSpeed, isPreparing, isGrouping, progress, duration: totalPreviewDuration, isPlaying, hasDefaultLogo,
+            isRendering, renderProgress, renderError, renderSpeed, isPreparing, audioIssue, isUnlockingAudio, isGrouping, progress, duration: totalPreviewDuration, isPlaying, hasDefaultLogo,
             colorEvents
         },
         setters: {
@@ -1853,6 +1880,7 @@ ${JSON.stringify(cleanAligned.map(w => ({ word: w.word, start: w.start_s, end: w
             canvasRef, audioRef, customVideoRef
         },
         handlers: {
+            unlockAudio,
             handleManualLoad, handleFileUpload, handleAudioUpload, handleLogoUpload, handleSetLogoAsDefault, handleClearDefaultLogo, handleApplyLyrics, handleApplyLrc, handleGenerateLrcFromCurrentLines, applyTemplatePreset, applyQt6LookPreset, randomizeQt6Look,
             handleReplaceAlignment, handleSmartGroup, handleSeek, togglePlay, startOfflineRender, handleImageError, setDuration: setAudioDuration,
             saveCurrentPreset, applySavedPreset, deleteSavedPreset,

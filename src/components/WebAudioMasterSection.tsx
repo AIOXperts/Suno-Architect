@@ -4,7 +4,7 @@ import LibraryPickerModal, { LibrarySelection } from './LibraryPickerModal';
 import WebAudioMasterNativeControls from './WebAudioMasterNativeControls';
 import WebAudioMasterNativePreview, { NativePreviewStatusSummary } from './WebAudioMasterNativePreview';
 import { MasteringSettings, OfflineTrack, TrackVariant } from '../services/offlineDb';
-import { convertToWav, isEncryptedSunoStream, resolveSunoAudioUrl, waitForWavConversion } from '../services/sunoApi';
+import { authorizeSunoDownload, convertToWav, isEncryptedSunoStream, resolveSunoAudioUrl, SunoDownloadError, waitForWavConversion } from '../services/sunoApi';
 import { createDefaultMasteringSettings, renderNativeMasteredWavFromBlob } from '../services/mastering/nativeMasteringPipeline';
 
 type SelectedReference = {
@@ -134,7 +134,17 @@ const WebAudioMasterSection: React.FC<WebAudioMasterSectionProps> = ({ sunoCooki
     try {
       if (!variant && (!sourceUrl || isEncryptedSunoStream(sourceUrl))) {
         if (!sunoCookie) throw new Error('Connect your Suno account in Settings to load library audio.');
-        sourceUrl = (await resolveSunoAudioUrl(track.sunoId || track.id, sunoCookie)).url;
+        const clipId = track.sunoId || track.id;
+        try {
+          sourceUrl = (await resolveSunoAudioUrl(clipId, sunoCookie)).url;
+        } catch (err) {
+          if (!(err instanceof SunoDownloadError) || !err.needsUnlock) throw err;
+          // Spending a monthly download needs an explicit OK.
+          const ok = window.confirm(`"${track.title}" is not unlocked for download on Suno yet.\nUnlock it now? This uses 1 of your monthly Suno downloads.`);
+          if (!ok) throw new Error('Song is not unlocked on Suno.');
+          await authorizeSunoDownload(clipId, sunoCookie);
+          sourceUrl = (await resolveSunoAudioUrl(clipId, sunoCookie)).url;
+        }
       }
       const response = await fetch(sourceUrl);
       const blob = await response.blob();
@@ -143,7 +153,7 @@ const WebAudioMasterSection: React.FC<WebAudioMasterSectionProps> = ({ sunoCooki
       await loadBlobReference(blob, `${sourceTitle}.${ext}`, reference);
     } catch (error) {
       console.error('Failed to load track audio:', error);
-      setWavProgress('Failed to load audio');
+      setWavProgress(error instanceof Error && error.message ? `Failed to load audio: ${error.message}` : 'Failed to load audio');
     }
   }, [loadBlobReference, sunoCookie]);
 

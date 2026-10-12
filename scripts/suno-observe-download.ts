@@ -57,33 +57,23 @@ log.push('after Download click: ' + dialogs.map((t) => t.replace(/\s+/g, ' ').sl
 const opts = await page.locator('button, [role="menuitem"], [role="option"], a').evaluateAll((els) =>
   els.filter((e) => /mp3|audio|wav|download/i.test(e.textContent || '')).map((e) => `${e.tagName}:${(e.textContent || '').trim().slice(0, 60)}`));
 log.push('candidates: ' + opts.join(' | '));
-page.on('request', (req) => { if (!/\.(png|jpe?g|webp|svg|woff2?|css)(\?|$)/i.test(req.url()) && !/statsig|datadog|sentry|google|segment|braze|stratovibe|locales/i.test(req.url())) log.push(`AFTER-CLICK REQ ${req.method()} ${req.url().slice(0, 500)} body=${(req.postData() || '').slice(0, 200)}`); });
-page.on('response', async (res) => { const u = res.url(); if (/studio-api.*(download|unlock|media|clips\/[0-9a-f-]+\/)/i.test(u) && res.request().method() !== 'OPTIONS') { let b=''; try { b=(await res.text()).slice(0,600);} catch {} log.push(`AFTER-CLICK RES ${res.status()} ${u.slice(0,200)} :: ${b.replace(/\s+/g,' ')}`); } });
-const mp3 = page.locator('[role="dialog"] button:has-text("MP3")').first();
+page.on('request', (req) => { if (/studio-api|cdn1|s3\.amazonaws|cloudfront/i.test(req.url()) && !/\.(png|jpe?g|webp|svg|woff2?|css)(\?|$)/i.test(req.url())) log.push(`REQ2 ${req.method()} ${req.url().slice(0, 300)} body=${(req.postData() || '').slice(0, 400)}`); });
+page.on('response', async (res) => { const u = res.url(); if (/studio-api.*(download|unlock|authorize|billing)/i.test(u) && res.request().method() !== 'OPTIONS') { let b=''; try { b=(await res.text()).slice(0,700);} catch {} log.push(`RES2 ${res.status()} ${u.slice(0,200)} :: ${b.replace(/\s+/g,' ')}`); } });
+const fmt = page.locator('[role="dialog"] button:has-text("MP3")').first();
+await fmt.click({ timeout: 3000 }).catch((e) => log.push('fmt click failed ' + e.message.split('\n')[0]));
+await page.waitForTimeout(1500);
+await page.screenshot({ path: '.suno-session/observe/after-fmt.png' });
+log.push('dialog after fmt: ' + (await page.locator('[role="dialog"]').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').slice(0, 300)).join(' || '));
+const unlock = page.locator('[role="dialog"] button:has-text("Unlock")').first();
+log.push('unlock disabled=' + (await unlock.getAttribute('disabled')));
 const [download] = await Promise.all([
-  page.waitForEvent('download', { timeout: 25000 }).catch(() => null),
-  mp3.click({ timeout: 3000 }).catch((e) => log.push('mp3 click failed ' + e.message.split('\n')[0])),
+  page.waitForEvent('download', { timeout: 30000 }).catch(() => null),
+  unlock.click({ timeout: 5000 }).catch((e) => log.push('unlock click failed ' + e.message.split('\n')[0])),
 ]);
 if (download) { log.push('DOWNLOAD url=' + download.url().slice(0, 700) + ' name=' + download.suggestedFilename()); await download.cancel().catch(() => {}); }
-await page.waitForTimeout(2000);
-await page.screenshot({ path: '.suno-session/observe/after-mp3.png' });
-const html2 = await page.locator('[role="dialog"]').last().evaluate((el) => el.outerHTML.replace(/<svg.*?<\/svg>/gs, '<svg/>').replace(/ class="[^"]*"/g, ''));
-require('node:fs').writeFileSync('.suno-session/observe/dialog-after-mp3.html', html2);
-const errs: string[] = [];
-page.on('console', (m) => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
-const dlBtn2 = page.locator('[role="dialog"] button:has-text("Download")').last();
-log.push('Download btn disabled after MP3=' + (await dlBtn2.getAttribute('disabled')));
-if ((await dlBtn2.getAttribute('disabled')) === null) {
-  const [download2] = await Promise.all([
-    page.waitForEvent('download', { timeout: 25000 }).catch(() => null),
-    dlBtn2.click({ timeout: 3000 }).catch((e) => log.push('download2 click failed ' + e.message.split('\n')[0])),
-  ]);
-  if (download2) { log.push('DOWNLOAD2 url=' + download2.url().slice(0, 700) + ' name=' + download2.suggestedFilename()); await download2.cancel().catch(() => {}); }
-  await page.waitForTimeout(6000);
-}
-log.push('console errors: ' + errs.join(' | '));
-const dialogs2 = await page.locator('[role="dialog"]').allInnerTexts();
-log.push('dialog after MP3: ' + dialogs2.map((t) => t.replace(/\s+/g, ' ').slice(0, 300)).join(' || '));
+await page.waitForTimeout(8000);
+await page.screenshot({ path: '.suno-session/observe/after-unlock.png' });
+log.push('dialog after unlock: ' + (await page.locator('[role="dialog"]').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ').slice(0, 400)).join(' || '));
 log.push('js chunks: ' + jsUrls.size);
 const hits: string[] = [];
 for (const u of jsUrls) {

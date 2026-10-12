@@ -361,7 +361,8 @@ test.describe('Library picker modal', () => {
     await row.getByLabel('Track actions').click();
     await row.locator('[data-track-action="archive"]').click();
 
-    await expect(row).toHaveAttribute('data-track-status', 'archived');
+    // The archive handler lazy-imports the sync service; under a parallel run Vite may still be transforming it.
+    await expect(row).toHaveAttribute('data-track-status', 'archived', { timeout: 15_000 });
     await expect(row.locator('[data-track-chip="archived"]')).toBeVisible();
     await expect(row.locator('[data-track-action="select"]')).toBeDisabled();
     await expect.poll(() => readCacheKeys(page)).not.toContain(audioUrlFor('pick-one'));
