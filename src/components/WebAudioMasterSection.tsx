@@ -4,7 +4,7 @@ import LibraryPickerModal, { LibrarySelection } from './LibraryPickerModal';
 import WebAudioMasterNativeControls from './WebAudioMasterNativeControls';
 import WebAudioMasterNativePreview, { NativePreviewStatusSummary } from './WebAudioMasterNativePreview';
 import { MasteringSettings, OfflineTrack, TrackVariant } from '../services/offlineDb';
-import { convertToWav, waitForWavConversion } from '../services/sunoApi';
+import { convertToWav, isEncryptedSunoStream, resolveSunoAudioUrl, waitForWavConversion } from '../services/sunoApi';
 import { createDefaultMasteringSettings, renderNativeMasteredWavFromBlob } from '../services/mastering/nativeMasteringPipeline';
 
 type SelectedReference = {
@@ -44,7 +44,12 @@ function mapWamSettingsToVariantSettings(raw?: Record<string, any>): MasteringSe
   };
 }
 
-const WebAudioMasterSection: React.FC = () => {
+interface WebAudioMasterSectionProps {
+  /** Suno bearer token; needed to resolve presigned audio links for library tracks. */
+  sunoCookie?: string;
+}
+
+const WebAudioMasterSection: React.FC<WebAudioMasterSectionProps> = ({ sunoCookie }) => {
   const settingsStorageKey = 'wam_native_settings_v1';
   const [showLibraryPicker, setShowLibraryPicker] = useState(false);
   const [selectedReference, setSelectedReference] = useState<SelectedReference | null>(null);
@@ -122,11 +127,15 @@ const WebAudioMasterSection: React.FC = () => {
       return;
     }
 
-    const sourceUrl = variant?.audioUrl || track.audioUrl;
+    let sourceUrl = variant?.audioUrl || track.audioUrl;
     setSelectedReference(reference);
     setWavProgress('Loading audio...');
 
     try {
+      if (!variant && (!sourceUrl || isEncryptedSunoStream(sourceUrl))) {
+        if (!sunoCookie) throw new Error('Connect your Suno account in Settings to load library audio.');
+        sourceUrl = (await resolveSunoAudioUrl(track.sunoId || track.id, sunoCookie)).url;
+      }
       const response = await fetch(sourceUrl);
       const blob = await response.blob();
       const ext = sourceUrl.split('.').pop() || (variant ? 'wav' : 'mp3');
@@ -136,7 +145,7 @@ const WebAudioMasterSection: React.FC = () => {
       console.error('Failed to load track audio:', error);
       setWavProgress('Failed to load audio');
     }
-  }, [loadBlobReference]);
+  }, [loadBlobReference, sunoCookie]);
 
   const handleUploadWav = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

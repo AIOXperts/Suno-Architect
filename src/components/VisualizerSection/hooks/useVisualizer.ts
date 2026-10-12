@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { SunoClip, AlignedWord, Qt6Style, AIProviderConfig } from '../../../types';
-import { getLyricAlignment, getSunoClip } from '../../../services/sunoApi';
+import { getLyricAlignment, getSunoClip, resolveSunoAudioUrl, isEncryptedSunoStream } from '../../../services/sunoApi';
 import { ASPECT_RATIOS } from '../../../constants';
 import { drawCover, drawQt6Visualizer, drawScrollingLyrics, drawCornerPulseVisualizer, drawLogoCircularWave, drawLogoExpandingCircle, drawLogoWatermark, type VisualizerFrameData } from '../../../utils/visualizer';
 import { groupLyricsByLines, matchWordsToPrompt, groupWordsByTiming, stripMetaTags, getCleanAlignedWords, groupWordsByLrcWithText, generateLrc, parseLrc, detectLongLyricLines, detectLongLrcGaps, looksLikeTimedLyricsJson, parseTimedLyricsJson } from '../../../utils/lyrics';
@@ -551,6 +551,18 @@ export const useVisualizer = (
             }
 
             if (cancelled) return;
+
+            // Browsers cannot play Suno's encrypted progressive stream; fetch a presigned MP3
+            // link for unlocked songs instead (cached ~1h, never spends download credits).
+            if (sunoCookie && !selectedClipId.startsWith('draft_') && (!currentClip.audioUrl || isEncryptedSunoStream(currentClip.audioUrl))) {
+                try {
+                    const resolved = await resolveSunoAudioUrl(selectedClipId, sunoCookie);
+                    currentClip = { ...currentClip, audioUrl: resolved.url, audioContentType: 'mp3' };
+                } catch (e: any) {
+                    console.warn('No playable audio link for clip', selectedClipId, e?.message || e);
+                }
+                if (cancelled) return;
+            }
             setClipData(currentClip);
 
             let sourceText = currentClip.metadata?.prompt || "";

@@ -983,7 +983,7 @@ const App: React.FC<AppProps> = ({ onSignOut }) => {
           case 'album-builder':
               return <AlbumBuilderSection history={history} />;
           case 'web-audio-master':
-              return <WebAudioMasterSection />;
+              return <WebAudioMasterSection sunoCookie={sunoCookie} />;
           case 'cover-matrix':
               return (
                 <CoverMatrixSection

@@ -4,7 +4,7 @@ import CopyButton from '../CopyButton';
 import { getLyricAlignment } from '../../services/sunoApi';
 import { matchWordsToPrompt, stripMetaTags, generateLrc, generateSrt } from '../../utils/lyrics';
 import { addSongToAlbum, createAlbum, getSongMeta, listAlbums, removeSongFromAlbum, setSongTags } from '../../services/libraryService';
-import { audioExtensionForContentType, formatVarietyName, legacySunoAudioUrl } from '../../services/sunoApi';
+import { audioExtensionForContentType, formatVarietyName, resolveSunoAudioUrl, SunoDownloadError } from '../../services/sunoApi';
 
 interface DetailsModalProps {
   clip: SunoClip;
@@ -294,16 +294,22 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
       modelVersion: clip.majorModelVersion,
   };
 
-  const audioUrl = clip.audioUrl || legacySunoAudioUrl(clip.id);
   const audioExt = clip.audioUrl ? audioExtensionForContentType(clip.audioContentType) : 'mp3';
   const [isDownloadingAudio, setIsDownloadingAudio] = useState(false);
-  const [audioDownloadError, setAudioDownloadError] = useState<string | null>(null);
+  const [audioDownloadError, setAudioDownloadError] = useState<{ message: string; needsUnlock?: boolean } | null>(null);
 
   const handleDownloadAudio = async () => {
       setAudioDownloadError(null);
       setIsDownloadingAudio(true);
       try {
-          const response = await fetch(audioUrl);
+          // Suno serves downloads as short-lived presigned links for songs the account has
+          // unlocked; a direct mp3/wav media URL (rare) is used as-is.
+          let url = clip.audioUrl;
+          if (!url) {
+              if (!sunoCookie) throw new Error('Connect your Suno account in Settings to download audio.');
+              url = (await resolveSunoAudioUrl(clip.id, sunoCookie)).url;
+          }
+          const response = await fetch(url);
           if (!response.ok) throw new Error(`Audio request failed (${response.status})`);
           const blob = await response.blob();
           const blobUrl = URL.createObjectURL(blob);
@@ -316,11 +322,11 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
           URL.revokeObjectURL(blobUrl);
       } catch (err: any) {
           console.warn('Audio download failed', err);
-          setAudioDownloadError(
-              clip.audioUrl
-                  ? `Download failed: ${err?.message || 'unknown error'}.`
-                  : 'No audio link for this clip yet. Refresh history from Suno to fetch the current download URL.'
-          );
+          if (err instanceof SunoDownloadError) {
+              setAudioDownloadError({ message: err.message, needsUnlock: err.reason !== 'rate_limited' && err.reason !== 'pending_timeout' });
+          } else {
+              setAudioDownloadError({ message: `Download failed: ${err?.message || 'unknown error'}` });
+          }
       } finally {
           setIsDownloadingAudio(false);
       }
@@ -805,7 +811,18 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
                     {!isDraft && (
                         <>
                             {audioDownloadError && (
-                                <span className="text-xs text-red-400 self-center mr-auto" role="alert">{audioDownloadError}</span>
+                                <span className="text-xs text-red-400 self-center mr-auto" role="alert">
+                                    {audioDownloadError.message}
+                                    {audioDownloadError.needsUnlock && (
+                                        <>
+                                            {' '}
+                                            <a href={`https://suno.com/song/${clip.id}`} target="_blank" rel="noopener noreferrer" className="underline text-[var(--app-accent)]">
+                                                Unlock on Suno
+                                            </a>
+                                            {' (uses one of your plan\u2019s monthly downloads).'}
+                                        </>
+                                    )}
+                                </span>
                             )}
                             <button
                             type="button"

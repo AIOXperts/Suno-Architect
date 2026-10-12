@@ -373,20 +373,21 @@ export const audioExtensionForContentType = (contentType?: string): string => {
 };
 
 /**
- * Picks the best playable audio URL from a raw feed/playlist clip:
- * media_urls (mp3 preferred, then m4a, then anything with a url), falling back to
- * audio_url/song_path only when they are not the forbidden placeholder.
+ * Picks a directly playable audio URL from a raw feed/playlist clip, if any.
+ * NOTE: the `m4a-opus` progressive entry in media_urls is encrypted (only Suno's own
+ * player can decode it), so it is deliberately skipped; only plain mp3/wav entries or a
+ * non-placeholder audio_url qualify. When this returns undefined, resolve a presigned
+ * link on demand with resolveSunoAudioUrl().
  */
 export const pickSunoAudioUrl = (clip: any): { url: string; contentType?: string } | undefined => {
     const media: SunoMediaUrl[] = Array.isArray(clip?.media_urls) ? clip.media_urls : [];
-    const withUrl = media.filter((m) => typeof m?.url === 'string' && m.url.length > 0);
-    const rank = (m: SunoMediaUrl) => {
+    const playable = media.filter((m) => {
+        if (typeof m?.url !== 'string' || !m.url) return false;
         const ct = (m.content_type || '').toLowerCase();
-        if (ct.startsWith('mp3')) return 0;
-        if (ct.startsWith('m4a')) return 1;
-        return 2;
-    };
-    const best = [...withUrl].sort((a, b) => rank(a) - rank(b))[0];
+        return ct.startsWith('mp3') || ct.startsWith('wav');
+    });
+    const rank = (m: SunoMediaUrl) => ((m.content_type || '').toLowerCase().startsWith('mp3') ? 0 : 1);
+    const best = [...playable].sort((a, b) => rank(a) - rank(b))[0];
     if (best?.url) return { url: best.url, contentType: best.content_type };
 
     for (const candidate of [clip?.audio_url, clip?.song_path, clip?.audioUrl]) {
@@ -396,6 +397,97 @@ export const pickSunoAudioUrl = (clip: any): { url: string; contentType?: string
     }
     return undefined;
 };
+
+// ---------------------------------------------------------------------------
+// Downloads: Suno gates audio behind per-song "unlock" + presigned links.
+// GET /api/download/clip/{id} → { ok, status: "ready"|"pending", download_url } or
+// { ok: false, reason, message } (e.g. rate_limited, or the song is not unlocked yet).
+// ---------------------------------------------------------------------------
+
+export class SunoDownloadError extends SunoApiError {
+    readonly reason: string;
+    constructor(reason: string, message: string, status?: number) {
+        super(message, status);
+        this.name = 'SunoDownloadError';
+        this.reason = reason;
+    }
+}
+
+export interface SunoDownloadResolution {
+    url: string;
+    /** Unix ms when the presigned link stops working (parsed from the URL), if known. */
+    expiresAt?: number;
+    format: 'mp3';
+}
+
+const presignedExpiryMs = (url: string): number | undefined => {
+    try {
+        const expires = new URL(url).searchParams.get('Expires');
+        if (expires && /^\d+$/.test(expires)) return Number(expires) * 1000;
+    } catch {}
+    return undefined;
+};
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Asks Suno for a presigned MP3 link for a clip the account has unlocked. Polls while
+ * the server reports "pending". Throws SunoDownloadError with `reason` on refusal
+ * (rate_limited, not unlocked, ...). Never calls the unlock/authorize endpoint, so it
+ * cannot spend the account's monthly download allowance.
+ */
+export const getSunoDownloadUrl = async (
+    clipId: string,
+    cookie: string,
+    options?: { pollAttempts?: number; pollDelayMs?: number }
+): Promise<SunoDownloadResolution> => {
+    if (!clipId) throw new SunoDownloadError('invalid_clip', 'No clip id provided');
+    const attempts = Math.max(1, options?.pollAttempts ?? 6);
+    const delay = options?.pollDelayMs ?? 2000;
+
+    for (let i = 0; i < attempts; i++) {
+        const raw = await sunoFetch<any>(`/api/download/clip/${encodeURIComponent(clipId)}`, cookie);
+        const ok = raw?.ok === true;
+        const url = typeof raw?.download_url === 'string' ? raw.download_url : '';
+        if (ok && url) {
+            return { url, expiresAt: presignedExpiryMs(url), format: 'mp3' };
+        }
+        if (ok && raw?.status && raw.status !== 'ready') {
+            if (i < attempts - 1) await sleep(delay);
+            continue;
+        }
+        const reason = typeof raw?.reason === 'string' ? raw.reason : ok ? 'no_url' : 'unavailable';
+        const message = typeof raw?.message === 'string' && raw.message
+            ? raw.message
+            : reason === 'rate_limited'
+                ? 'Suno is rate limiting downloads. Wait a moment and try again.'
+                : 'Suno did not provide a download link for this song. Unlock it on suno.com first.';
+        throw new SunoDownloadError(reason, message);
+    }
+    throw new SunoDownloadError('pending_timeout', 'Suno is still preparing this download. Try again shortly.');
+};
+
+const downloadUrlCache = new Map<string, SunoDownloadResolution>();
+const inflightDownloadUrl = new Map<string, Promise<SunoDownloadResolution>>();
+
+/** Cached + de-duplicated getSunoDownloadUrl; reuses a presigned link until ~1 min before expiry. */
+export const resolveSunoAudioUrl = async (clipId: string, cookie: string): Promise<SunoDownloadResolution> => {
+    const cached = downloadUrlCache.get(clipId);
+    if (cached && (!cached.expiresAt || cached.expiresAt - Date.now() > 60_000)) return cached;
+    const pending = inflightDownloadUrl.get(clipId);
+    if (pending) return pending;
+    const task = getSunoDownloadUrl(clipId, cookie)
+        .then((res) => { downloadUrlCache.set(clipId, res); return res; })
+        .finally(() => inflightDownloadUrl.delete(clipId));
+    inflightDownloadUrl.set(clipId, task);
+    return task;
+};
+
+export const clearSunoDownloadCache = (): void => { downloadUrlCache.clear(); };
+
+/** True when a stored URL is the encrypted progressive stream that browsers cannot play. */
+export const isEncryptedSunoStream = (url?: string): boolean =>
+    !!url && /cloudfront\.net\/.*\.m4a(\?|$)/i.test(url);
 
 export interface SunoPlaylistClipRecord {
     id: string;

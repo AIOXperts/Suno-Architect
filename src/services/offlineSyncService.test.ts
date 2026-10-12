@@ -205,7 +205,8 @@ describe('mapHistoryClipToOfflineTrack', () => {
     const t = mapHistoryClipToOfflineTrack(makeHistoryClip('h1'), NOW);
     expect(t.id).toBe('h1');
     expect(t.sunoId).toBe('h1');
-    expect(t.audioUrl).toBe('https://cdn1.suno.ai/h1.mp3');
+    // No fake cdn1 link: audio is resolved on demand via resolveSunoAudioUrl (cdn1 needs signed cookies now).
+    expect(t.audioUrl).toBe('');
     expect(t.imageUrl).toBe('https://cdn2.suno.ai/image_large_h1.jpeg');
     expect(t.metadata).toEqual({ tags: ['rock', 'indie'], prompt: 'hello world', durationMs: 90400 });
     expect(t.lyricsText).toBe('hello world');

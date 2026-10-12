@@ -1,4 +1,4 @@
-import { getLyricAlignment, getSunoClip, getSunoFeedAll, getSunoPlaylist, legacySunoAudioUrl, pickSunoAudioUrl } from './sunoApi';
+import { getLyricAlignment, getSunoClip, getSunoFeedAll, getSunoPlaylist, isEncryptedSunoStream, pickSunoAudioUrl } from './sunoApi';
 import { generateLrc, generateSrt, groupWordsByTiming, stripMetaTags } from '../utils/lyrics';
 import type { SunoClip } from '../types';
 import {
@@ -50,7 +50,8 @@ const toTags = (raw: string | undefined): string[] => {
 
 const buildTrack = (clip: any, now: number, prev?: OfflineTrack): OfflineTrack => {
   const metadata = clip?.metadata || {};
-  const audioUrl = pickSunoAudioUrl(clip)?.url || prev?.audioUrl || '';
+  const prevAudio = prev?.audioUrl && !isEncryptedSunoStream(prev.audioUrl) ? prev.audioUrl : '';
+  const audioUrl = pickSunoAudioUrl(clip)?.url || prevAudio;
   const imageUrl = clip?.image_large_url || clip?.image_url || '';
   const promptLyrics = metadata.prompt || prev?.lyricsText || '';
   return {
@@ -375,7 +376,7 @@ export function mapHistoryClipToOfflineTrack(clip: SunoClip, now: number = Date.
     id: clip.id,
     sunoId: clip.id,
     title: clip.title || 'Untitled',
-    audioUrl: clip.audioUrl || legacySunoAudioUrl(clip.id),
+    audioUrl: clip.audioUrl || '',
     imageUrl: clip.imageLargeUrl || clip.imageUrl || '',
     lyricsText: prompt,
     lrcContent: clip.lrcContent || '',

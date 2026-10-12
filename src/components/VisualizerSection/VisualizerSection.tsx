@@ -15,7 +15,6 @@ import AiControlsCard from './subcomponents/AiControlsCard';
 import ActionButtons from './subcomponents/ActionButtons';
 import WordAlignmentEditorCard from './subcomponents/WordAlignmentEditorCard';
 import LibraryPickerModal from '../LibraryPickerModal';
-import { legacySunoAudioUrl } from '../../services/sunoApi';
 
 type TabKey = 'lyrics' | 'style' | 'media' | 'timeline' | 'dsp' | 'export';
 
@@ -613,7 +612,7 @@ const VisualizerSection: React.FC<VisualizerSectionProps> = ({ history, sunoCook
           <audio
             ref={refs.audioRef}
             controls
-            src={state.customAudio ? state.customAudio.url : (state.clipData?.audioUrl || legacySunoAudioUrl(state.selectedClipId))}
+            src={state.customAudio ? state.customAudio.url : (state.clipData?.audioUrl || undefined)}
             crossOrigin="anonymous"
             className="hidden"
             onLoadedMetadata={(e) => handlers.setDuration(e.currentTarget.duration)}
