@@ -848,7 +848,7 @@ const DetailsModal: React.FC<DetailsModalProps> = ({ clip, onClose, onUpdateClip
                             {unlockPrompt && (
                                 <div className="mr-auto flex items-center gap-3 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2" role="alertdialog" data-testid="unlock-prompt">
                                     <span>
-                                        This song isn\u2019t unlocked for download yet. Unlocking uses 1 of your monthly Suno downloads
+                                        This song isn’t unlocked for download yet. Unlocking uses 1 of your monthly Suno downloads
                                         {unlockPrompt.quota ? ` (${unlockPrompt.quota.remaining} left${unlockPrompt.quota.periodEnd ? `, refreshes ${new Date(unlockPrompt.quota.periodEnd).toLocaleDateString()}` : ''})` : ''}.
                                     </span>
                                     <button type="button" onClick={handleUnlockAndDownload} disabled={isUnlocking} className="px-3 py-1 rounded bg-amber-500/80 hover:bg-amber-400 text-black font-bold disabled:opacity-60 whitespace-nowrap">
